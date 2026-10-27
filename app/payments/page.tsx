@@ -1,8 +1,11 @@
 import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
-import authOptions from "../../auth";
-import { prisma } from "../../lib/prisma";
+
+import authOptions from "@/auth";
+import { prisma } from "@/lib/prisma";
+
+export const instant = false;
 
 export default async function PaymentsPage() {
   const session = await getServerSession(authOptions);
@@ -29,8 +32,7 @@ export default async function PaymentsPage() {
   });
 
   const totalPayment = payments.reduce(
-    (sum, payment) =>
-      sum + Number(payment.amount),
+    (sum, payment) => sum + Number(payment.amount),
     0
   );
 
@@ -49,9 +51,7 @@ export default async function PaymentsPage() {
     });
   }
 
-  function getPaymentMethodLabel(
-    method: string
-  ) {
+  function getPaymentMethodLabel(method: string) {
     switch (method) {
       case "TRANSFER":
         return "โอนเงิน";
@@ -74,32 +74,31 @@ export default async function PaymentsPage() {
   }
 
   function getStatusLabel(status: string) {
-  switch (status) {
-    case "PAID":
-      return "ชำระครบแล้ว";
+    switch (status) {
+      case "PAID":
+        return "ชำระครบแล้ว";
 
-    case "PARTIAL":
-      return "ชำระบางส่วน";
+      case "PARTIAL":
+        return "ชำระบางส่วน";
 
-    case "ISSUED":
-      return "ออก Invoice แล้ว";
+      case "ISSUED":
+        return "ออก Invoice แล้ว";
 
-    case "DRAFT":
-      return "ฉบับร่าง";
+      case "DRAFT":
+        return "ฉบับร่าง";
 
-    case "CANCELLED":
-      return "ยกเลิก";
+      case "CANCELLED":
+        return "ยกเลิก";
 
-    default:
-      return status;
+      default:
+        return status;
+    }
   }
-}
 
   return (
     <main className="min-h-screen bg-slate-100 p-6">
       <div className="mx-auto max-w-7xl">
         {/* Header */}
-
         <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-center">
           <div>
             <h1 className="text-2xl font-bold text-slate-800">
@@ -120,7 +119,6 @@ export default async function PaymentsPage() {
         </div>
 
         {/* Summary */}
-
         <div className="mb-6 grid gap-4 md:grid-cols-3">
           <div className="rounded-xl border border-slate-200 bg-white p-5">
             <p className="text-sm text-slate-500">
@@ -128,10 +126,7 @@ export default async function PaymentsPage() {
             </p>
 
             <p className="mt-2 text-2xl font-bold text-slate-800">
-              {payments.length.toLocaleString(
-                "th-TH"
-              )}{" "}
-              รายการ
+              {payments.length.toLocaleString("th-TH")} รายการ
             </p>
           </div>
 
@@ -153,10 +148,7 @@ export default async function PaymentsPage() {
             <p className="mt-2 text-2xl font-bold text-blue-600">
               {
                 new Set(
-                  payments.map(
-                    (payment) =>
-                      payment.invoice.id
-                  )
+                  payments.map((payment) => payment.invoice.id)
                 ).size
               }{" "}
               ใบ
@@ -165,7 +157,6 @@ export default async function PaymentsPage() {
         </div>
 
         {/* Payment Table */}
-
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
@@ -222,84 +213,60 @@ export default async function PaymentsPage() {
                       className="border-b border-slate-100 hover:bg-slate-50"
                     >
                       {/* Date */}
-
                       <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                        {formatDate(
-                          payment.paymentDate
-                        )}
+                        {formatDate(payment.paymentDate)}
                       </td>
 
                       {/* Invoice */}
-
                       <td className="whitespace-nowrap px-4 py-3">
                         <Link
                           href={`/invoices/${payment.invoice.id}`}
                           className="font-semibold text-blue-600 hover:text-blue-800 hover:underline"
                         >
-                          {
-                            payment.invoice
-                              .invoiceNumber
-                          }
+                          {payment.invoice.invoiceNumber}
                         </Link>
                       </td>
 
                       {/* Customer */}
-
                       <td className="px-4 py-3 text-slate-700">
-                        {
-                          payment.invoice
-                            .customerNameSnapshot
-                        }
+                        {payment.invoice.customerNameSnapshot}
                       </td>
 
                       {/* Amount */}
-
                       <td className="whitespace-nowrap px-4 py-3 text-right font-semibold text-emerald-600">
-                        {formatMoney(
-                          Number(payment.amount)
-                        )}{" "}
-                        บาท
+                        {formatMoney(Number(payment.amount))} บาท
                       </td>
 
                       {/* Payment Method */}
-
                       <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                        {getPaymentMethodLabel(
-                          payment.paymentMethod
-                        )}
+                        {getPaymentMethodLabel(payment.paymentMethod)}
                       </td>
 
                       {/* Reference */}
-
                       <td className="px-4 py-3 text-slate-600">
-                        {payment.referenceNumber ||
-                          "-"}
+                        {payment.referenceNumber || "-"}
                       </td>
 
                       {/* Invoice Status */}
-
                       <td className="px-4 py-3 text-center">
                         <span
-  className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
-    payment.invoice.status === "PAID"
-      ? "bg-emerald-100 text-emerald-700"
-      : payment.invoice.status === "PARTIAL"
-        ? "bg-blue-100 text-blue-700"
-        : payment.invoice.status === "ISSUED"
-          ? "bg-amber-100 text-amber-700"
-          : payment.invoice.status === "CANCELLED"
-            ? "bg-red-100 text-red-700"
-            : "bg-slate-100 text-slate-700"
-  }`}
->
-  {getStatusLabel(
-    payment.invoice.status
-  )}
-</span>
+                          className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
+                            payment.invoice.status === "PAID"
+                              ? "bg-emerald-100 text-emerald-700"
+                              : payment.invoice.status === "PARTIAL"
+                                ? "bg-blue-100 text-blue-700"
+                                : payment.invoice.status === "ISSUED"
+                                  ? "bg-amber-100 text-amber-700"
+                                  : payment.invoice.status === "CANCELLED"
+                                    ? "bg-red-100 text-red-700"
+                                    : "bg-slate-100 text-slate-700"
+                          }`}
+                        >
+                          {getStatusLabel(payment.invoice.status)}
+                        </span>
                       </td>
 
                       {/* Action */}
-
                       <td className="px-4 py-3 text-center">
                         <Link
                           href={`/invoices/${payment.invoice.id}`}

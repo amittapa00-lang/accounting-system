@@ -1,9 +1,11 @@
 import { getServerSession } from "next-auth";
-import { redirect, notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
-import authOptions from "../../../auth";
-import { prisma } from "../../../lib/prisma";
 
+import authOptions from "@/auth";
+import { prisma } from "@/lib/prisma";
+
+export const instant = false;
 
 type Props = {
   params: Promise<{
@@ -32,16 +34,12 @@ function getStatusLabel(status: string) {
   switch (status) {
     case "DRAFT":
       return "ฉบับร่าง";
-
     case "CONFIRMED":
       return "ยืนยันแล้ว";
-
     case "COMPLETED":
       return "เสร็จสิ้น";
-
     case "CANCELLED":
       return "ยกเลิก";
-
     default:
       return status;
   }
@@ -106,7 +104,6 @@ export default async function PurchaseOrderDetailPage({
   return (
     <main className="min-h-screen bg-slate-100 p-6">
       <div className="mx-auto max-w-7xl space-y-6">
-
         {/* Header */}
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
@@ -135,15 +132,15 @@ export default async function PurchaseOrderDetailPage({
             >
               แก้ไข PO
             </Link>
+
             <Link
-  href={`/invoices/new?purchaseOrderId=${purchaseOrder.id}`}
-  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
->
-  สร้าง Invoice จาก PO
-</Link>
+              href={`/invoices/new?purchaseOrderId=${purchaseOrder.id}`}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+            >
+              สร้าง Invoice จาก PO
+            </Link>
           </div>
         </div>
-        
 
         {/* PO Information */}
         <section className="rounded-xl bg-white p-6 shadow-sm">
@@ -154,52 +151,36 @@ export default async function PurchaseOrderDetailPage({
           </div>
 
           <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
-
             <div>
-              <label className="text-xs text-slate-500">
-                PO No.
-              </label>
-
+              <label className="text-xs text-slate-500">PO No.</label>
               <div className="mt-1 font-medium text-slate-800">
                 {purchaseOrder.poNumber}
               </div>
             </div>
 
             <div>
-              <label className="text-xs text-slate-500">
-                วันที่ PO
-              </label>
-
+              <label className="text-xs text-slate-500">วันที่ PO</label>
               <div className="mt-1 font-medium text-slate-800">
                 {formatDate(purchaseOrder.poDate)}
               </div>
             </div>
 
             <div>
-              <label className="text-xs text-slate-500">
-                สถานะ
-              </label>
-
+              <label className="text-xs text-slate-500">สถานะ</label>
               <div className="mt-1 font-medium text-slate-800">
                 {getStatusLabel(purchaseOrder.status)}
               </div>
             </div>
 
             <div>
-              <label className="text-xs text-slate-500">
-                PLANT
-              </label>
-
+              <label className="text-xs text-slate-500">PLANT</label>
               <div className="mt-1 text-slate-800">
                 {purchaseOrder.plant || "-"}
               </div>
             </div>
 
             <div>
-              <label className="text-xs text-slate-500">
-                วันที่ส่งสินค้า
-              </label>
-
+              <label className="text-xs text-slate-500">วันที่ส่งสินค้า</label>
               <div className="mt-1 text-slate-800">
                 {formatDate(purchaseOrder.deliveryDate)}
               </div>
@@ -209,17 +190,13 @@ export default async function PurchaseOrderDetailPage({
               <label className="text-xs text-slate-500">
                 สถานที่ส่งสินค้า
               </label>
-
               <div className="mt-1 text-slate-800">
                 {purchaseOrder.deliveryPlace || "-"}
               </div>
             </div>
 
             <div>
-              <label className="text-xs text-slate-500">
-                วางบิล
-              </label>
-
+              <label className="text-xs text-slate-500">วางบิล</label>
               <div className="mt-1 text-slate-800">
                 {purchaseOrder.billPlacement || "-"}
               </div>
@@ -229,17 +206,13 @@ export default async function PurchaseOrderDetailPage({
               <label className="text-xs text-slate-500">
                 เครดิต / Payment Term
               </label>
-
               <div className="mt-1 text-slate-800">
                 {purchaseOrder.paymentTerm || "-"}
               </div>
             </div>
 
             <div>
-              <label className="text-xs text-slate-500">
-                Quotation No.
-              </label>
-
+              <label className="text-xs text-slate-500">Quotation No.</label>
               <div className="mt-1 text-slate-800">
                 {purchaseOrder.quotationNumber || "-"}
               </div>
@@ -249,12 +222,10 @@ export default async function PurchaseOrderDetailPage({
               <label className="text-xs text-slate-500">
                 วันที่ Quotation
               </label>
-
               <div className="mt-1 text-slate-800">
                 {formatDate(purchaseOrder.quotationDate)}
               </div>
             </div>
-
           </div>
         </section>
 
@@ -267,42 +238,29 @@ export default async function PurchaseOrderDetailPage({
           </div>
 
           <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-
             <div>
-              <label className="text-xs text-slate-500">
-                รหัสลูกค้า
-              </label>
-
+              <label className="text-xs text-slate-500">รหัสลูกค้า</label>
               <div className="mt-1 font-medium text-slate-800">
                 {purchaseOrder.customer.code}
               </div>
             </div>
 
             <div>
-              <label className="text-xs text-slate-500">
-                ชื่อลูกค้า
-              </label>
-
+              <label className="text-xs text-slate-500">ชื่อลูกค้า</label>
               <div className="mt-1 font-medium text-slate-800">
                 {purchaseOrder.customer.name}
               </div>
             </div>
 
             <div className="md:col-span-2">
-              <label className="text-xs text-slate-500">
-                ที่อยู่
-              </label>
-
+              <label className="text-xs text-slate-500">ที่อยู่</label>
               <div className="mt-1 text-slate-800">
                 {purchaseOrder.customer.address || "-"}
               </div>
             </div>
 
             <div>
-              <label className="text-xs text-slate-500">
-                โทรศัพท์
-              </label>
-
+              <label className="text-xs text-slate-500">โทรศัพท์</label>
               <div className="mt-1 text-slate-800">
                 {purchaseOrder.customer.tel || "-"}
               </div>
@@ -312,17 +270,13 @@ export default async function PurchaseOrderDetailPage({
               <label className="text-xs text-slate-500">
                 เลขประจำตัวผู้เสียภาษี
               </label>
-
               <div className="mt-1 text-slate-800">
                 {purchaseOrder.customer.taxId || "-"}
               </div>
             </div>
 
             <div>
-              <label className="text-xs text-slate-500">
-                ผู้ติดต่อ
-              </label>
-
+              <label className="text-xs text-slate-500">ผู้ติดต่อ</label>
               <div className="mt-1 text-slate-800">
                 {purchaseOrder.contactName ||
                   purchaseOrder.customer.contactName ||
@@ -334,14 +288,12 @@ export default async function PurchaseOrderDetailPage({
               <label className="text-xs text-slate-500">
                 โทรศัพท์ผู้ติดต่อ
               </label>
-
               <div className="mt-1 text-slate-800">
                 {purchaseOrder.contactPhone ||
                   purchaseOrder.contactMobile ||
                   "-"}
               </div>
             </div>
-
           </div>
         </section>
 
@@ -357,37 +309,14 @@ export default async function PurchaseOrderDetailPage({
             <table className="min-w-full">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-sm">
-                  <th className="px-4 py-3 text-center">
-                    #
-                  </th>
-
-                  <th className="px-4 py-3 text-left">
-                    รายละเอียด
-                  </th>
-
-                  <th className="px-4 py-3 text-right">
-                    จำนวน
-                  </th>
-
-                  <th className="px-4 py-3 text-center">
-                    หน่วย
-                  </th>
-
-                  <th className="px-4 py-3 text-right">
-                    ราคาต่อหน่วย
-                  </th>
-
-                  <th className="px-4 py-3 text-right">
-                    ส่วนลด
-                  </th>
-
-                  <th className="px-4 py-3 text-right">
-                    VAT
-                  </th>
-
-                  <th className="px-4 py-3 text-right">
-                    จำนวนเงิน
-                  </th>
+                  <th className="px-4 py-3 text-center">#</th>
+                  <th className="px-4 py-3 text-left">รายละเอียด</th>
+                  <th className="px-4 py-3 text-right">จำนวน</th>
+                  <th className="px-4 py-3 text-center">หน่วย</th>
+                  <th className="px-4 py-3 text-right">ราคาต่อหน่วย</th>
+                  <th className="px-4 py-3 text-right">ส่วนลด</th>
+                  <th className="px-4 py-3 text-right">VAT</th>
+                  <th className="px-4 py-3 text-right">จำนวนเงิน</th>
                 </tr>
               </thead>
 
@@ -396,9 +325,7 @@ export default async function PurchaseOrderDetailPage({
                   const discountText =
                     item.discountType === "AMOUNT"
                       ? formatMoney(Number(item.discount))
-                      : `${formatMoney(
-                          Number(item.discount)
-                        )}%`;
+                      : `${formatMoney(Number(item.discount))}%`;
 
                   return (
                     <tr
@@ -446,11 +373,8 @@ export default async function PurchaseOrderDetailPage({
           {/* Summary */}
           <div className="mt-6 flex justify-end">
             <div className="w-full max-w-md space-y-3">
-
               <div className="flex justify-between text-sm">
-                <span className="text-slate-500">
-                  รวมก่อน VAT
-                </span>
+                <span className="text-slate-500">รวมก่อน VAT</span>
 
                 <span className="font-medium text-slate-800">
                   {formatMoney(subtotal)}
@@ -458,9 +382,7 @@ export default async function PurchaseOrderDetailPage({
               </div>
 
               <div className="flex justify-between text-sm">
-                <span className="text-slate-500">
-                  VAT
-                </span>
+                <span className="text-slate-500">VAT</span>
 
                 <span className="font-medium text-slate-800">
                   {formatMoney(vat)}
@@ -476,7 +398,6 @@ export default async function PurchaseOrderDetailPage({
                   {formatMoney(grandTotal)}
                 </span>
               </div>
-
             </div>
           </div>
         </section>
@@ -490,7 +411,6 @@ export default async function PurchaseOrderDetailPage({
           </div>
 
           <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-
             <div>
               <label className="text-xs text-slate-500">
                 โทรศัพท์ผู้ติดต่อ
@@ -522,15 +442,12 @@ export default async function PurchaseOrderDetailPage({
             </div>
 
             <div className="md:col-span-2">
-              <label className="text-xs text-slate-500">
-                หมายเหตุ
-              </label>
+              <label className="text-xs text-slate-500">หมายเหตุ</label>
 
               <div className="mt-1 whitespace-pre-wrap text-slate-800">
                 {purchaseOrder.note || "-"}
               </div>
             </div>
-
           </div>
         </section>
 
@@ -551,25 +468,11 @@ export default async function PurchaseOrderDetailPage({
               <table className="min-w-full">
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-50 text-sm">
-                    <th className="px-4 py-3 text-left">
-                      Invoice No.
-                    </th>
-
-                    <th className="px-4 py-3 text-left">
-                      วันที่
-                    </th>
-
-                    <th className="px-4 py-3 text-left">
-                      ประเภท
-                    </th>
-
-                    <th className="px-4 py-3 text-right">
-                      ยอดรวม
-                    </th>
-
-                    <th className="px-4 py-3 text-center">
-                      สถานะ
-                    </th>
+                    <th className="px-4 py-3 text-left">Invoice No.</th>
+                    <th className="px-4 py-3 text-left">วันที่</th>
+                    <th className="px-4 py-3 text-left">ประเภท</th>
+                    <th className="px-4 py-3 text-right">ยอดรวม</th>
+                    <th className="px-4 py-3 text-center">สถานะ</th>
                   </tr>
                 </thead>
 
@@ -605,7 +508,6 @@ export default async function PurchaseOrderDetailPage({
             </div>
           )}
         </section>
-
       </div>
     </main>
   );

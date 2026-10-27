@@ -1,11 +1,13 @@
 import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
 
-import authOptions from "../../auth";
-import { prisma } from "../../lib/prisma";
+import authOptions from "@/auth";
+import { prisma } from "@/lib/prisma";
 
 import CustomerForm from "./CustomerForm";
 import CustomerList from "./CustomerList";
+
+export const instant = false;
 
 export default async function CustomersPage() {
   const session = await getServerSession(authOptions);

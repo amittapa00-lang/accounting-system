@@ -1,8 +1,12 @@
 import { getServerSession } from "next-auth";
-import { redirect, notFound } from "next/navigation";
-import authOptions from "../../../../auth";
-import { prisma } from "../../../../lib/prisma";
+import { notFound, redirect } from "next/navigation";
+
+import authOptions from "@/auth";
+import { prisma } from "@/lib/prisma";
+
 import PurchaseOrderForm from "../../PurchaseOrderForm";
+
+export const instant = false;
 
 type Props = {
   params: Promise<{ id: string }>;
@@ -19,32 +23,31 @@ export default async function EditPurchaseOrderPage({
 
   const { id } = await params;
 
-  const purchaseOrder =
-    await prisma.purchaseOrder.findUnique({
-      where: {
-        id,
-      },
-      include: {
-        customer: {
-          select: {
-            id: true,
-            code: true,
-            name: true,
-            address: true,
-            tel: true,
-            taxId: true,
-            branchType: true,
-            branchNumber: true,
-            contactName: true,
-          },
-        },
-        items: {
-          orderBy: {
-            itemNo: "asc",
-          },
+  const purchaseOrder = await prisma.purchaseOrder.findUnique({
+    where: {
+      id,
+    },
+    include: {
+      customer: {
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          address: true,
+          tel: true,
+          taxId: true,
+          branchType: true,
+          branchNumber: true,
+          contactName: true,
         },
       },
-    });
+      items: {
+        orderBy: {
+          itemNo: "asc",
+        },
+      },
+    },
+  });
 
   if (!purchaseOrder) {
     notFound();
@@ -75,35 +78,21 @@ export default async function EditPurchaseOrderPage({
     poNumber: purchaseOrder.poNumber,
     customerId: purchaseOrder.customerId,
     plant: purchaseOrder.plant ?? "",
-    poDate: purchaseOrder.poDate
-      .toISOString()
-      .slice(0, 10),
+    poDate: purchaseOrder.poDate.toISOString().slice(0, 10),
     deliveryDate: purchaseOrder.deliveryDate
-      ? purchaseOrder.deliveryDate
-          .toISOString()
-          .slice(0, 10)
+      ? purchaseOrder.deliveryDate.toISOString().slice(0, 10)
       : "",
-    deliveryPlace:
-      purchaseOrder.deliveryPlace ?? "",
-    billPlacement:
-      purchaseOrder.billPlacement ?? "",
-    paymentTerm:
-      purchaseOrder.paymentTerm ?? "",
-    quotationNumber:
-      purchaseOrder.quotationNumber ?? "",
+    deliveryPlace: purchaseOrder.deliveryPlace ?? "",
+    billPlacement: purchaseOrder.billPlacement ?? "",
+    paymentTerm: purchaseOrder.paymentTerm ?? "",
+    quotationNumber: purchaseOrder.quotationNumber ?? "",
     quotationDate: purchaseOrder.quotationDate
-      ? purchaseOrder.quotationDate
-          .toISOString()
-          .slice(0, 10)
+      ? purchaseOrder.quotationDate.toISOString().slice(0, 10)
       : "",
-    contactName:
-      purchaseOrder.contactName ?? "",
-    contactPhone:
-      purchaseOrder.contactPhone ?? "",
-    contactMobile:
-      purchaseOrder.contactMobile ?? "",
-    acceptanceCondition:
-      purchaseOrder.acceptanceCondition ?? "",
+    contactName: purchaseOrder.contactName ?? "",
+    contactPhone: purchaseOrder.contactPhone ?? "",
+    contactMobile: purchaseOrder.contactMobile ?? "",
+    acceptanceCondition: purchaseOrder.acceptanceCondition ?? "",
     note: purchaseOrder.note ?? "",
     status: purchaseOrder.status,
     items: purchaseOrder.items.map((item) => ({

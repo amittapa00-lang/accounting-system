@@ -1,12 +1,13 @@
-
 import { getServerSession } from "next-auth";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 
-import authOptions from "../../../auth";
-import { prisma } from "../../../lib/prisma";
+import authOptions from "@/auth";
+import { prisma } from "@/lib/prisma";
 
 import CustomerEditForm from "./CustomerEditForm";
+
+export const instant = false;
 
 type PageProps = {
   params: Promise<{

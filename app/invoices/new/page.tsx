@@ -1,9 +1,13 @@
 import { getServerSession } from "next-auth";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
-import authOptions from "../../../auth";
-import { prisma } from "../../../lib/prisma";
+
+import authOptions from "@/auth";
+import { prisma } from "@/lib/prisma";
+
 import InvoiceForm from "../InvoiceForm";
+
+export const instant = false;
 
 type Props = {
   searchParams: Promise<{
