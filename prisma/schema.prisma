@@ -1,0 +1,141 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Customer {
+  id             String          @id @default(cuid())
+  code           String          @unique
+  name           String
+  address        String?
+  tel            String?
+  taxId          String?
+  branchType     String?
+  branchNumber   String?
+  contactName    String?
+  email          String?
+  note           String?
+  isActive       Boolean         @default(true)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  purchaseOrders PurchaseOrder[]
+}
+
+model PurchaseOrder {
+  id                  String              @id @default(cuid())
+  poNumber            String              @unique
+  plant               String?
+  poDate              DateTime
+  deliveryDate        DateTime?
+  deliveryPlace       String?
+  billPlacement       String?
+  paymentTerm         String?
+  quotationNumber     String?
+  quotationDate       DateTime?
+  contactName         String?
+  contactPhone        String?
+  contactMobile       String?
+  acceptanceCondition String?
+  note                String?
+  status              String              @default("DRAFT")
+  customerId          String
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  invoices            Invoice[]
+  customer            Customer            @relation(fields: [customerId], references: [id])
+  items               PurchaseOrderItem[]
+}
+
+model PurchaseOrderItem {
+  id String @id @default(cuid())
+  itemNo Int
+  description String
+  quantity Decimal
+  unit String?
+  unitPrice Decimal
+  discount Decimal @default(0)
+  discountType String @default("PERCENT")
+  vat Decimal @default(0)
+  amount Decimal
+  purchaseOrderId String
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Invoice {
+  id                      String        @id @default(cuid())
+  invoiceNumber           String        @unique
+  documentType            String
+  invoiceDate             DateTime
+  customerCodeSnapshot    String?
+  customerNameSnapshot    String
+  customerAddressSnapshot String?
+  customerTaxIdSnapshot   String?
+  shipToSnapshot          String?
+  dueDate                 DateTime?
+  paymentTerm             String?
+  saleOrderNumber         String?
+  saleName                String?
+  entryBy                 String?
+  purchaseOrderId         String
+  subtotal                Decimal       @default(0)
+  vat                     Decimal       @default(0)
+  grandTotal              Decimal       @default(0)
+  status                  String        @default("DRAFT")
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt
+  purchaseOrder           PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  items                   InvoiceItem[]
+  payments                Payment[]
+}
+
+model InvoiceItem {
+  id              String   @id @default(cuid())
+  itemNo          Int
+  description     String
+  quantity        Decimal
+  unit            String?
+  unitPrice       Decimal
+  discountPercent Decimal  @default(0)
+  amount          Decimal
+  invoiceId       String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  invoice         Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+}
+
+model Payment {
+  id              String   @id @default(cuid())
+  paymentDate     DateTime
+  amount          Decimal
+  paymentMethod   String
+  referenceNumber String?
+  note            String?
+  receivedBy      String?
+  invoiceId       String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  invoice         Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id String @id @default(cuid())
+
+  username String  @unique
+  email    String? @unique
+  password String
+
+  name String?
+
+  role String @default("ADMIN")
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
