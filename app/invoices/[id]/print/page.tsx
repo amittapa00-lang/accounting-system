@@ -22,36 +22,34 @@ const OFFSET_X = 0;
 const OFFSET_Y = 0;
 
 /* =========================================================
-   ตำแหน่งข้อมูลบนแบบฟอร์ม
-   กระดาษ 9 x 11 นิ้ว
-   = 228.6 x 279.4 mm
+   ตำแหน่งข้อมูล
 ========================================================= */
 
 const POS = {
   /* =====================================================
-     Invoice No. / Date
+     INVOICE NUMBER
   ===================================================== */
 
   invoiceNumber: {
-    left: 163,
-    top: 20,
-    width: 51,
+    left: 165,
+    top: 21,
+    width: 45,
   },
 
   invoiceDate: {
-    left: 163,
-    top: 27,
-    width: 42,
+    left: 165,
+    top: 28,
+    width: 40,
   },
 
   /* =====================================================
-     Customer
+     CUSTOMER
   ===================================================== */
 
   customerCode: {
-    left: 36,
-    top: 64,
-    width: 55,
+    left: 28,
+    top: 65,
+    width: 45,
   },
 
   customerName: {
@@ -67,68 +65,68 @@ const POS = {
   },
 
   /* =====================================================
-     Ship To / Due Date / Payment
+     SHIP TO
   ===================================================== */
 
   shipTo: {
-    left: 158,
-    top: 50,
-    width: 62,
+    left: 160,
+    top: 51,
+    width: 57,
   },
 
   dueDateTop: {
-    left: 158,
-    top: 62,
-    width: 40,
+    left: 160,
+    top: 63,
+    width: 38,
   },
 
   paymentTermTop: {
-    left: 158,
-    top: 73,
-    width: 40,
+    left: 160,
+    top: 74,
+    width: 38,
   },
 
   /* =====================================================
-     แถวข้อมูลใต้ Customer
+     ตารางข้อมูลใต้ Customer
 
-     รอบนี้เลื่อนลงจาก 88 → 96 mm
-     เพื่อไม่ให้ชนกับที่อยู่ลูกค้า
+     สำคัญ:
+     แต่ละช่องแยกออกจากกันชัดเจน
   ===================================================== */
 
   saleOrder: {
-    left: 29,
-    top: 96,
+    left: 19,
+    top: 97,
     width: 36,
   },
 
   paymentTerm: {
-    left: 67,
-    top: 96,
-    width: 26,
+    left: 57,
+    top: 97,
+    width: 27,
   },
 
   dueDate: {
-    left: 88,
-    top: 96,
-    width: 26,
+    left: 86,
+    top: 97,
+    width: 27,
   },
 
   poNumber: {
-    left: 117,
-    top: 96,
-    width: 40,
+    left: 116,
+    top: 97,
+    width: 38,
   },
 
   saleName: {
-    left: 160,
-    top: 96,
-    width: 26,
+    left: 157,
+    top: 97,
+    width: 30,
   },
 
   entryBy: {
-    left: 188,
-    top: 96,
-    width: 32,
+    left: 190,
+    top: 97,
+    width: 28,
   },
 
   /* =====================================================
@@ -136,21 +134,21 @@ const POS = {
   ===================================================== */
 
   subtotal: {
-    left: 190,
+    left: 188,
     top: 205.5,
-    width: 32,
+    width: 34,
   },
 
   vat: {
-    left: 190,
+    left: 188,
     top: 216.5,
-    width: 32,
+    width: 34,
   },
 
   grandTotal: {
-    left: 190,
+    left: 188,
     top: 226,
-    width: 32,
+    width: 34,
   },
 
   /* =====================================================
@@ -160,29 +158,26 @@ const POS = {
   amountInWords: {
     left: 28,
     top: 226,
-    width: 158,
+    width: 155,
   },
 };
 
 /* =========================================================
    ตารางสินค้า
-
-   เลื่อนลงตามแถวข้อมูลด้านบน
 ========================================================= */
 
 const ITEM_START_TOP = 120;
 
-/* ระยะห่างระหว่างรายการ */
 const ITEM_ROW_HEIGHT = 7;
 
 /* =========================================================
-   ตำแหน่งแต่ละคอลัมน์
+   COLUMN
 ========================================================= */
 
 const COL = {
   itemNo: {
     left: 18,
-    width: 11,
+    width: 10,
   },
 
   description: {
@@ -191,8 +186,8 @@ const COL = {
   },
 
   quantity: {
-    left: 117,
-    width: 13,
+    left: 116,
+    width: 14,
   },
 
   unitPrice: {
@@ -212,7 +207,7 @@ const COL = {
 };
 
 /* =========================================================
-   Format เงิน
+   FORMAT MONEY
 ========================================================= */
 
 function formatMoney(value: unknown) {
@@ -223,7 +218,7 @@ function formatMoney(value: unknown) {
 }
 
 /* =========================================================
-   Format วันที่
+   FORMAT DATE
 ========================================================= */
 
 function formatDate(
@@ -265,9 +260,7 @@ function numberToThaiText(number: number): string {
 
     let result = "";
 
-    /* ===================================================
-       ล้าน
-    =================================================== */
+    /* ล้าน */
 
     if (num >= 1_000_000) {
       const millionPart =
@@ -278,10 +271,6 @@ function numberToThaiText(number: number): string {
 
       num %= 1_000_000;
     }
-
-    /* ===================================================
-       หลักต่าง ๆ
-    =================================================== */
 
     const digits = [
       {
@@ -372,7 +361,8 @@ function numberToThaiText(number: number): string {
       }
 
       result +=
-        numbers[digit.value] + digit.unit;
+        numbers[digit.value] +
+        digit.unit;
     }
 
     return result;
@@ -380,16 +370,13 @@ function numberToThaiText(number: number): string {
 
   let result = "";
 
-  /* บาท */
-
   if (baht === 0) {
     result = "ศูนย์บาท";
   } else {
     result =
-      convertNumber(baht) + "บาท";
+      convertNumber(baht) +
+      "บาท";
   }
-
-  /* สตางค์ */
 
   if (satang === 0) {
     result += "ถ้วน";
@@ -403,7 +390,7 @@ function numberToThaiText(number: number): string {
 }
 
 /* =========================================================
-   Type สำหรับตำแหน่ง
+   TYPE
 ========================================================= */
 
 type Box = {
@@ -413,7 +400,7 @@ type Box = {
 };
 
 /* =========================================================
-   ฟังก์ชันกำหนดตำแหน่ง
+   POSITION
 ========================================================= */
 
 function pos(
@@ -423,25 +410,29 @@ function pos(
   return {
     position: "absolute",
 
-    left: `${p.left + OFFSET_X}mm`,
+    left:
+      `${p.left + OFFSET_X}mm`,
 
-    top: `${p.top + OFFSET_Y}mm`,
+    top:
+      `${p.top + OFFSET_Y}mm`,
 
-    width: `${p.width}mm`,
+    width:
+      `${p.width}mm`,
 
     ...extra,
   };
 }
 
 /* =========================================================
-   Invoice Print Page
+   PAGE
 ========================================================= */
 
 export default async function InvoicePrintPage({
   params,
 }: PageProps) {
+
   /* =====================================================
-     ตรวจสอบ Login
+     LOGIN
   ===================================================== */
 
   const session =
@@ -452,13 +443,13 @@ export default async function InvoicePrintPage({
   }
 
   /* =====================================================
-     รับ ID
+     ID
   ===================================================== */
 
   const { id } = await params;
 
   /* =====================================================
-     ดึง Invoice
+     INVOICE
   ===================================================== */
 
   const invoice =
@@ -489,7 +480,7 @@ export default async function InvoicePrintPage({
   }
 
   /* =====================================================
-     จำนวนเงินเป็นตัวหนังสือ
+     AMOUNT IN WORDS
   ===================================================== */
 
   const amountInWords =
@@ -599,7 +590,7 @@ export default async function InvoicePrintPage({
         .field {
           position: absolute;
 
-          font-size: 10pt;
+          font-size: 9.5pt;
 
           line-height: 1.15;
 
@@ -608,6 +599,8 @@ export default async function InvoicePrintPage({
           white-space: nowrap;
 
           overflow: hidden;
+
+          text-overflow: clip;
 
           font-family:
             Arial,
@@ -624,6 +617,35 @@ export default async function InvoicePrintPage({
         }
 
         .field.center {
+          text-align: center;
+        }
+
+        /* =================================================
+           FIELD TABLE
+
+           ป้องกันข้อความข้ามช่อง
+        ================================================= */
+
+        .table-field {
+          position: absolute;
+
+          font-size: 8.5pt;
+
+          line-height: 1.1;
+
+          color: #000;
+
+          white-space: nowrap;
+
+          overflow: hidden;
+
+          text-overflow: clip;
+
+          font-family:
+            Arial,
+            Tahoma,
+            sans-serif;
+
           text-align: center;
         }
 
@@ -649,7 +671,7 @@ export default async function InvoicePrintPage({
         }
 
         /* =================================================
-           AMOUNT IN WORDS
+           AMOUNT WORDS
         ================================================= */
 
         .amount-in-words {
@@ -737,7 +759,7 @@ export default async function InvoicePrintPage({
       </div>
 
       {/* =====================================================
-          กระดาษ
+          PAPER
       ===================================================== */}
 
       <div className="print-page">
@@ -777,7 +799,10 @@ export default async function InvoicePrintPage({
         <div
           className="field"
           style={pos(
-            POS.customerCode
+            POS.customerCode,
+            {
+              fontSize: "9pt",
+            }
           )}
         >
           {invoice.customerCodeSnapshot ??
@@ -791,7 +816,10 @@ export default async function InvoicePrintPage({
         <div
           className="field"
           style={pos(
-            POS.customerName
+            POS.customerName,
+            {
+              fontSize: "9.5pt",
+            }
           )}
         >
           {invoice.customerNameSnapshot}
@@ -808,9 +836,11 @@ export default async function InvoicePrintPage({
             {
               height: "16mm",
 
-              lineHeight: "1.35",
+              lineHeight: "1.3",
 
               whiteSpace: "normal",
+
+              fontSize: "9pt",
             }
           )}
         >
@@ -830,6 +860,10 @@ export default async function InvoicePrintPage({
               height: "10mm",
 
               lineHeight: "1.15",
+
+              fontSize: "8.5pt",
+
+              whiteSpace: "normal",
             }
           )}
         >
@@ -838,13 +872,16 @@ export default async function InvoicePrintPage({
         </div>
 
         {/* =================================================
-            DUE DATE ด้านบน
+            DUE DATE TOP
         ================================================= */}
 
         <div
           className="field"
           style={pos(
-            POS.dueDateTop
+            POS.dueDateTop,
+            {
+              fontSize: "8.5pt",
+            }
           )}
         >
           {formatDate(
@@ -853,13 +890,16 @@ export default async function InvoicePrintPage({
         </div>
 
         {/* =================================================
-            PAYMENT TERM ด้านบน
+            PAYMENT TERM TOP
         ================================================= */}
 
         <div
           className="field"
           style={pos(
-            POS.paymentTermTop
+            POS.paymentTermTop,
+            {
+              fontSize: "8.5pt",
+            }
           )}
         >
           {invoice.paymentTerm ??
@@ -871,9 +911,14 @@ export default async function InvoicePrintPage({
         ================================================= */}
 
         <div
-          className="field"
+          className="table-field"
           style={pos(
-            POS.saleOrder
+            POS.saleOrder,
+            {
+              textAlign: "center",
+              paddingLeft: "1mm",
+              paddingRight: "1mm",
+            }
           )}
         >
           {invoice.saleOrderNumber ??
@@ -885,9 +930,14 @@ export default async function InvoicePrintPage({
         ================================================= */}
 
         <div
-          className="field"
+          className="table-field"
           style={pos(
-            POS.paymentTerm
+            POS.paymentTerm,
+            {
+              textAlign: "center",
+              paddingLeft: "1mm",
+              paddingRight: "1mm",
+            }
           )}
         >
           {invoice.paymentTerm ??
@@ -899,9 +949,14 @@ export default async function InvoicePrintPage({
         ================================================= */}
 
         <div
-          className="field"
+          className="table-field"
           style={pos(
-            POS.dueDate
+            POS.dueDate,
+            {
+              textAlign: "center",
+              paddingLeft: "1mm",
+              paddingRight: "1mm",
+            }
           )}
         >
           {formatDate(
@@ -910,13 +965,18 @@ export default async function InvoicePrintPage({
         </div>
 
         {/* =================================================
-            PURCHASE ORDER NUMBER
+            PO NUMBER
         ================================================= */}
 
         <div
-          className="field"
+          className="table-field"
           style={pos(
-            POS.poNumber
+            POS.poNumber,
+            {
+              textAlign: "center",
+              paddingLeft: "1mm",
+              paddingRight: "1mm",
+            }
           )}
         >
           {
@@ -930,9 +990,14 @@ export default async function InvoicePrintPage({
         ================================================= */}
 
         <div
-          className="field"
+          className="table-field"
           style={pos(
-            POS.saleName
+            POS.saleName,
+            {
+              textAlign: "center",
+              paddingLeft: "1mm",
+              paddingRight: "1mm",
+            }
           )}
         >
           {invoice.saleName ??
@@ -944,9 +1009,14 @@ export default async function InvoicePrintPage({
         ================================================= */}
 
         <div
-          className="field"
+          className="table-field"
           style={pos(
-            POS.entryBy
+            POS.entryBy,
+            {
+              textAlign: "center",
+              paddingLeft: "1mm",
+              paddingRight: "1mm",
+            }
           )}
         >
           {invoice.entryBy ??
@@ -954,11 +1024,12 @@ export default async function InvoicePrintPage({
         </div>
 
         {/* =================================================
-            รายการสินค้า
+            ITEMS
         ================================================= */}
 
         {invoice.items.map(
           (item, index) => {
+
             const top =
               ITEM_START_TOP +
               index *
@@ -970,7 +1041,7 @@ export default async function InvoicePrintPage({
             return (
               <div key={item.id}>
 
-                {/* ITEM NO. */}
+                {/* ITEM NO */}
 
                 <div
                   className="item"
