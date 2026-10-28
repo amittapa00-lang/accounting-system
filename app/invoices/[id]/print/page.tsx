@@ -21,7 +21,7 @@ type PageProps = {
    - ลงต่ำ → ลด OFFSET_Y
    - ขึ้นสูง → เพิ่ม OFFSET_Y
 
-   แนะนำปรับทีละ 0.5 - 1 mm
+   ตอนนี้ใช้ 0 ก่อน
 ========================================================= */
 
 const OFFSET_X = 0;
@@ -34,156 +34,154 @@ const OFFSET_Y = 0;
 ========================================================= */
 
 const POS = {
-  /* -----------------------------
-     เลขที่เอกสาร / วันที่
-  ----------------------------- */
+  /* =====================================================
+     Invoice No. / Date
+  ===================================================== */
 
   invoiceNumber: {
-    left: 156,
-    top: 17.5,
-    width: 58,
+    left: 163,
+    top: 20,
+    width: 51,
   },
 
   invoiceDate: {
-    left: 156,
-    top: 24,
+    left: 163,
+    top: 27,
     width: 42,
   },
 
-  /* -----------------------------
+  /* =====================================================
      Customer
-  ----------------------------- */
+  ===================================================== */
 
   customerCode: {
     left: 57,
-    top: 42.5,
+    top: 67,
     width: 40,
   },
 
   customerName: {
     left: 28,
-    top: 53.5,
+    top: 75,
     width: 125,
   },
 
   customerAddress: {
     left: 28,
-    top: 61,
+    top: 83,
     width: 120,
   },
 
-  /* -----------------------------
+  /* =====================================================
      Ship To / Due Date / Payment
-  ----------------------------- */
+  ===================================================== */
 
   shipTo: {
     left: 158,
-    top: 45.5,
+    top: 50,
     width: 62,
   },
 
   dueDateTop: {
     left: 158,
-    top: 57.5,
+    top: 62,
     width: 40,
   },
 
   paymentTermTop: {
     left: 158,
-    top: 68,
+    top: 73,
     width: 40,
   },
 
-  /* -----------------------------
+  /* =====================================================
      แถวข้อมูลใต้หัวตาราง
-  ----------------------------- */
+  ===================================================== */
 
   saleOrder: {
     left: 29,
-    top: 80.5,
+    top: 88,
     width: 36,
   },
 
   paymentTerm: {
     left: 67,
-    top: 80.5,
+    top: 88,
     width: 26,
   },
 
   dueDate: {
     left: 88,
-    top: 80.5,
+    top: 88,
     width: 26,
   },
 
   poNumber: {
     left: 117,
-    top: 80.5,
+    top: 88,
     width: 40,
   },
 
   saleName: {
     left: 160,
-    top: 80.5,
+    top: 88,
     width: 26,
   },
 
   entryBy: {
     left: 188,
-    top: 80.5,
+    top: 88,
     width: 32,
   },
 
-  /* -----------------------------
+  /* =====================================================
      ยอดรวม
-  ----------------------------- */
+
+     แบบฟอร์มจริง:
+     Sub Total
+     V.A.T.
+     Grand Total
+  ===================================================== */
 
   subtotal: {
     left: 190,
-    top: 205.5,
+    top: 238,
     width: 32,
   },
 
   vat: {
     left: 190,
-    top: 216.5,
+    top: 248,
     width: 32,
   },
 
-  /* =====================================================
-     GRAND TOTAL
-
-     บรรทัดเดียวกับจำนวนเงินเป็นตัวหนังสือ
-  ===================================================== */
-
   grandTotal: {
     left: 190,
-    top: 226,
+    top: 258,
     width: 32,
   },
 
   /* =====================================================
      จำนวนเงินเป็นตัวหนังสือ
 
-     สำคัญ:
-     top ต้องเท่ากับ grandTotal = 226
-
-     เพื่อให้อยู่ "บรรทัดเดียวกัน"
-     กับยอดรวมทั้งสิ้น
+     ต้องอยู่บรรทัดเดียวกับ Grand Total
   ===================================================== */
 
   amountInWords: {
     left: 28,
-    top: 226,
+    top: 258,
     width: 158,
   },
 };
 
 /* =========================================================
    ตารางสินค้า
+
+   แบบฟอร์มจริงมีหัวตารางก่อน
+   แล้วรายการสินค้าจึงเริ่มด้านล่าง
 ========================================================= */
 
-const ITEM_START_TOP = 96.5;
+const ITEM_START_TOP = 116;
 
 /* ระยะห่างระหว่างรายการ */
 const ITEM_ROW_HEIGHT = 7;
@@ -253,20 +251,6 @@ function formatDate(
 
 /* =========================================================
    แปลงตัวเลขเป็นข้อความภาษาไทย
-
-   ตัวอย่าง
-
-   12
-   = สิบสองบาทถ้วน
-
-   100
-   = หนึ่งร้อยบาทถ้วน
-
-   1,250
-   = หนึ่งพันสองร้อยห้าสิบบาทถ้วน
-
-   100,899.79
-   = หนึ่งแสนแปดร้อยเก้าสิบเก้าบาทเจ็ดสิบเก้าสตางค์
 ========================================================= */
 
 function numberToThaiText(number: number): string {
@@ -290,9 +274,7 @@ function numberToThaiText(number: number): string {
 
     let result = "";
 
-    /* -----------------------------
-       หลักล้าน
-    ----------------------------- */
+    /* ล้าน */
 
     if (num >= 1_000_000) {
       const millionPart =
@@ -304,44 +286,35 @@ function numberToThaiText(number: number): string {
       num %= 1_000_000;
     }
 
-    /* -----------------------------
-       ตัวเลขแต่ละหลัก
-    ----------------------------- */
-
     const digits = [
       {
         value: Math.floor(num / 100_000),
         unit: "แสน",
       },
-
       {
         value: Math.floor(
           (num % 100_000) / 10_000
         ),
         unit: "หมื่น",
       },
-
       {
         value: Math.floor(
           (num % 10_000) / 1_000
         ),
         unit: "พัน",
       },
-
       {
         value: Math.floor(
           (num % 1_000) / 100
         ),
         unit: "ร้อย",
       },
-
       {
         value: Math.floor(
           (num % 100) / 10
         ),
         unit: "สิบ",
       },
-
       {
         value: num % 10,
         unit: "",
@@ -366,9 +339,7 @@ function numberToThaiText(number: number): string {
         continue;
       }
 
-      /* -----------------------------
-         หลักสิบ
-      ----------------------------- */
+      /* หลักสิบ */
 
       if (digit.unit === "สิบ") {
         if (digit.value === 1) {
@@ -383,9 +354,7 @@ function numberToThaiText(number: number): string {
         continue;
       }
 
-      /* -----------------------------
-         หลักหน่วย
-      ----------------------------- */
+      /* หลักหน่วย */
 
       if (digit.unit === "") {
         if (
@@ -409,20 +378,12 @@ function numberToThaiText(number: number): string {
 
   let result = "";
 
-  /* -----------------------------
-     บาท
-  ----------------------------- */
-
   if (baht === 0) {
     result = "ศูนย์บาท";
   } else {
     result =
       convertNumber(baht) + "บาท";
   }
-
-  /* -----------------------------
-     สตางค์
-  ----------------------------- */
 
   if (satang === 0) {
     result += "ถ้วน";
@@ -455,13 +416,9 @@ function pos(
 ): React.CSSProperties {
   return {
     position: "absolute",
-
     left: `${p.left + OFFSET_X}mm`,
-
     top: `${p.top + OFFSET_Y}mm`,
-
     width: `${p.width}mm`,
-
     ...extra,
   };
 }
@@ -563,8 +520,10 @@ export default async function InvoicePrintPage({
         body {
           margin: 0;
           padding: 0;
+
           width: 9in;
           min-width: 9in;
+
           background: #e5e7eb;
 
           font-family:
@@ -580,6 +539,7 @@ export default async function InvoicePrintPage({
         .print-toolbar {
           width: 100%;
           min-height: 60px;
+
           padding: 12px;
 
           background: white;
@@ -638,19 +598,13 @@ export default async function InvoicePrintPage({
             sans-serif;
         }
 
-        /* ข้อความหลายบรรทัด */
-
         .field.wrap {
           white-space: normal;
         }
 
-        /* ชิดขวา */
-
         .field.right {
           text-align: right;
         }
-
-        /* กึ่งกลาง */
 
         .field.center {
           text-align: center;
@@ -679,14 +633,6 @@ export default async function InvoicePrintPage({
 
         /* =================================================
            จำนวนเงินเป็นตัวหนังสือ
-
-           สำคัญ:
-           อยู่บรรทัดเดียวกับ Grand Total
-
-           top = 226mm
-           เท่ากับ POS.grandTotal
-
-           ไม่ให้ตัดบรรทัด
         ================================================= */
 
         .amount-in-words {
@@ -694,7 +640,7 @@ export default async function InvoicePrintPage({
 
           font-size: 8.5pt;
 
-          line-height: 1;
+          line-height: 6mm;
 
           font-weight: 500;
 
@@ -780,7 +726,7 @@ export default async function InvoicePrintPage({
       <div className="print-page">
 
         {/* =================================================
-            เลขที่ Invoice
+            Invoice No.
         ================================================= */}
 
         <div
@@ -793,7 +739,7 @@ export default async function InvoicePrintPage({
         </div>
 
         {/* =================================================
-            วันที่ Invoice
+            Invoice Date
         ================================================= */}
 
         <div
@@ -808,7 +754,7 @@ export default async function InvoicePrintPage({
         </div>
 
         {/* =================================================
-            CUSTOMER
+            Customer Code
         ================================================= */}
 
         <div
@@ -821,6 +767,10 @@ export default async function InvoicePrintPage({
             ""}
         </div>
 
+        {/* =================================================
+            Customer Name
+        ================================================= */}
+
         <div
           className="field"
           style={pos(
@@ -829,6 +779,10 @@ export default async function InvoicePrintPage({
         >
           {invoice.customerNameSnapshot}
         </div>
+
+        {/* =================================================
+            Customer Address
+        ================================================= */}
 
         <div
           className="field wrap"
@@ -845,7 +799,7 @@ export default async function InvoicePrintPage({
         </div>
 
         {/* =================================================
-            SHIP TO
+            Ship To
         ================================================= */}
 
         <div
@@ -892,10 +846,8 @@ export default async function InvoicePrintPage({
         </div>
 
         {/* =================================================
-            แถวข้อมูลใต้หัวตาราง
+            Sale Order
         ================================================= */}
-
-        {/* Sale Order */}
 
         <div
           className="field"
@@ -907,7 +859,9 @@ export default async function InvoicePrintPage({
             ""}
         </div>
 
-        {/* Payment Term */}
+        {/* =================================================
+            Payment Term
+        ================================================= */}
 
         <div
           className="field"
@@ -919,7 +873,9 @@ export default async function InvoicePrintPage({
             ""}
         </div>
 
-        {/* Due Date */}
+        {/* =================================================
+            Due Date
+        ================================================= */}
 
         <div
           className="field"
@@ -932,7 +888,9 @@ export default async function InvoicePrintPage({
           )}
         </div>
 
-        {/* PO Number */}
+        {/* =================================================
+            PO Number
+        ================================================= */}
 
         <div
           className="field"
@@ -946,7 +904,9 @@ export default async function InvoicePrintPage({
           }
         </div>
 
-        {/* Sale Name */}
+        {/* =================================================
+            Sale Name
+        ================================================= */}
 
         <div
           className="field"
@@ -958,7 +918,9 @@ export default async function InvoicePrintPage({
             ""}
         </div>
 
-        {/* Entry By */}
+        {/* =================================================
+            Entry By
+        ================================================= */}
 
         <div
           className="field"
@@ -989,9 +951,7 @@ export default async function InvoicePrintPage({
                 key={item.id}
               >
 
-                {/* -----------------------------------------
-                    Item No.
-                ----------------------------------------- */}
+                {/* Item No. */}
 
                 <div
                   className="item"
@@ -1012,9 +972,7 @@ export default async function InvoicePrintPage({
                   {item.itemNo}
                 </div>
 
-                {/* -----------------------------------------
-                    Description
-                ----------------------------------------- */}
+                {/* Description */}
 
                 <div
                   className="item"
@@ -1038,9 +996,7 @@ export default async function InvoicePrintPage({
                   {item.description}
                 </div>
 
-                {/* -----------------------------------------
-                    Quantity
-                ----------------------------------------- */}
+                {/* Quantity */}
 
                 <div
                   className="item"
@@ -1065,9 +1021,7 @@ export default async function InvoicePrintPage({
                   )}
                 </div>
 
-                {/* -----------------------------------------
-                    Unit Price
-                ----------------------------------------- */}
+                {/* Unit Price */}
 
                 <div
                   className="item"
@@ -1090,9 +1044,7 @@ export default async function InvoicePrintPage({
                   )}
                 </div>
 
-                {/* -----------------------------------------
-                    Discount
-                ----------------------------------------- */}
+                {/* Discount */}
 
                 <div
                   className="item"
@@ -1119,9 +1071,7 @@ export default async function InvoicePrintPage({
                     : ""}
                 </div>
 
-                {/* -----------------------------------------
-                    Amount
-                ----------------------------------------- */}
+                {/* Amount */}
 
                 <div
                   className="item"
@@ -1152,11 +1102,8 @@ export default async function InvoicePrintPage({
         {/* =================================================
             จำนวนเงินเป็นตัวหนังสือ
 
-            อยู่บรรทัดเดียวกับ
-            "รวมเงินทั้งสิ้น"
-
-            top = 226
-            ตรงกับ Grand Total
+            ต้องอยู่บรรทัดเดียวกับ
+            รวมเงินทั้งสิ้น / Grand Total
         ================================================= */}
 
         <div
@@ -1165,15 +1112,10 @@ export default async function InvoicePrintPage({
             POS.amountInWords,
             {
               height: "6mm",
-
               lineHeight: "6mm",
-
               padding: 0,
-
               margin: 0,
-
-              whiteSpace:
-                "nowrap",
+              whiteSpace: "nowrap",
             }
           )}
         >
@@ -1181,7 +1123,7 @@ export default async function InvoicePrintPage({
         </div>
 
         {/* =================================================
-            SUBTOTAL
+            SUB TOTAL
         ================================================= */}
 
         <div
