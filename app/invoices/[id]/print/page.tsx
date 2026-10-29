@@ -39,40 +39,40 @@ const OFFSET_Y = 0;
 ========================================================= */
 
 const POS = {
-  invoiceNumber: { left: 172, top: 29, width: 28 },
-  invoiceDate: { left: 172, top: 35, width: 28 },
+  invoiceNumber: { left: 185.5, top: 28.5, width: 24 },
+  invoiceDate: { left: 185.5, top: 34.5, width: 24 },
 
-  customerCode: { left: 45, top: 55, width: 30 },
+  customerCode: { left: 44.5, top: 56.5, width: 30 },
   customerName: { left: 15, top: 67, width: 125 },
   customerAddress: { left: 15, top: 71.5, width: 125 },
-  shipTo: { left: 140, top: 60, width: 60 },
+  shipTo: { left: 139, top: 67, width: 61 },
 
-  saleOrder: { left: 20, top: 95, width: 90 },
-  poNumber: { left: 115, top: 95, width: 33 },
-  saleName: { left: 150, top: 95, width: 25 },
-  entryBy: { left: 177, top: 95, width: 23 },
+  saleOrder: { left: 20, top: 81.5, width: 90 },
+  poNumber: { left: 115, top: 81.5, width: 33 },
+  saleName: { left: 150, top: 81.5, width: 25 },
+  entryBy: { left: 177, top: 81.5, width: 23 },
 
-  subtotal: { left: 178, top: 234, width: 22 },
-  vat: { left: 178, top: 244, width: 22 },
-  grandTotal: { left: 178, top: 254, width: 22 },
+  subtotal: { left: 178, top: 218, width: 22 },
+  vat: { left: 178, top: 228, width: 22 },
+  grandTotal: { left: 178, top: 238, width: 22 },
 
-  amountInWords: { left: 27, top: 252, width: 149 },
+  amountInWords: { left: 26, top: 237, width: 150 },
 };
 
 /* =========================================================
    ตารางสินค้า
 ========================================================= */
 
-const ITEM_START_TOP = 105;
+const ITEM_START_TOP = 99;
 const ITEM_ROW_HEIGHT = 7;
 
 const COL = {
   itemNo: { left: 15, width: 10 },
-  description: { left: 25, width: 60 },
-  quantity: { left: 85, width: 15 },
-  unitPrice: { left: 100, width: 25 },
-  discount: { left: 125, width: 25 },
-  amount: { left: 139, width: 30 },
+  description: { left: 20, width: 77 },
+  quantity: { left: 98, width: 13 },
+  unitPrice: { left: 111.5, width: 32 },
+  discount: { left: 143.5, width: 29 },
+  amount: { left: 173, width: 27 },
 };
 
 /* =========================================================
@@ -598,7 +598,7 @@ export default async function InvoicePrintPage({ params }: PageProps) {
                 className="item"
                 style={pos(
                   { ...COL.amount, top },
-                  { textAlign: "left", height: rowHeight, whiteSpace: "nowrap" }
+                  { textAlign: "right", height: rowHeight, whiteSpace: "nowrap" }
                 )}
               >
                 {formatMoney(item.amount)}
