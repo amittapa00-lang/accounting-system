@@ -49,7 +49,9 @@ app/
   api/               API (ทุก route ตรวจการล็อกอินด้วย requireApiSession)
   login/             หน้าเข้าสู่ระบบ
 components/
-  layout/            เมนูนำทาง ปุ่มออกจากระบบ
+  ui/                ชุดชิ้นส่วน UI กลาง (Button, Card, PageHeader, Table, Field/Input, Badge, Alert, toast ...)
+                     หน้าใหม่ควรประกอบจากชิ้นส่วนเหล่านี้ เพื่อให้หน้าตาเหมือนกันทั้งระบบ
+  layout/            เมนูด้านซ้าย / เมนูมือถือ / ข้อมูลผู้ใช้และปุ่มออกจากระบบ
   customers/  purchase-orders/  invoices/  payments/   ฟอร์มและตารางของแต่ละส่วน
 lib/
   auth.ts            ตั้งค่า next-auth + requirePageSession / requireApiSession
