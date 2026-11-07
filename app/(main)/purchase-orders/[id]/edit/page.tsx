@@ -1,10 +1,12 @@
-import { getServerSession } from "next-auth";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 
-import authOptions from "@/lib/auth";
+import { requirePageSession } from "@/lib/auth";
+import { toDateInputValue } from "@/lib/format";
+import { formatDiscountInput } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
+import { ACTIVE_INVOICE_WHERE, getPoLock } from "@/lib/purchase-orders";
 
-import PurchaseOrderForm from "@/components/purchase-orders/PurchaseOrderForm";
+import PurchaseOrderForm, { type PurchaseOrderInitialData } from "@/components/purchase-orders/PurchaseOrderForm";
 
 export const instant = false;
 
@@ -12,14 +14,8 @@ type Props = {
   params: Promise<{ id: string }>;
 };
 
-export default async function EditPurchaseOrderPage({
-  params,
-}: Props) {
-  const session = await getServerSession(authOptions);
-
-  if (!session) {
-    redirect("/login");
-  }
+export default async function EditPurchaseOrderPage({ params }: Props) {
+  await requirePageSession();
 
   const { id } = await params;
 
@@ -28,19 +24,6 @@ export default async function EditPurchaseOrderPage({
       id,
     },
     include: {
-      customer: {
-        select: {
-          id: true,
-          code: true,
-          name: true,
-          address: true,
-          tel: true,
-          taxId: true,
-          branchType: true,
-          branchNumber: true,
-          contactName: true,
-        },
-      },
       items: {
         orderBy: {
           itemNo: "asc",
@@ -53,79 +36,74 @@ export default async function EditPurchaseOrderPage({
     notFound();
   }
 
-  const customers = await prisma.customer.findMany({
-    where: {
-      isActive: true,
-    },
-    select: {
-      id: true,
-      code: true,
-      name: true,
-      address: true,
-      tel: true,
-      taxId: true,
-      branchType: true,
-      branchNumber: true,
-      contactName: true,
-    },
-    orderBy: {
-      name: "asc",
-    },
-  });
+  const [customers, activeInvoiceCount] = await Promise.all([
+    prisma.customer.findMany({
+      // The PO's own customer stays selectable even after it has been deactivated
+      where: {
+        OR: [{ isActive: true }, { id: purchaseOrder.customerId }],
+      },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        address: true,
+        tel: true,
+        taxId: true,
+        contactName: true,
+        isActive: true,
+      },
+      orderBy: {
+        name: "asc",
+      },
+    }),
+    prisma.invoice.count({
+      where: { purchaseOrderId: purchaseOrder.id, ...ACTIVE_INVOICE_WHERE },
+    }),
+  ]);
 
-  const initialData = {
+  const lock = getPoLock(purchaseOrder.status, activeInvoiceCount > 0);
+
+  const initialData: PurchaseOrderInitialData = {
     id: purchaseOrder.id,
-    poNumber: purchaseOrder.poNumber,
-    customerId: purchaseOrder.customerId,
-    plant: purchaseOrder.plant ?? "",
-    poDate: purchaseOrder.poDate.toISOString().slice(0, 10),
-    deliveryDate: purchaseOrder.deliveryDate
-      ? purchaseOrder.deliveryDate.toISOString().slice(0, 10)
-      : "",
-    deliveryPlace: purchaseOrder.deliveryPlace ?? "",
-    billPlacement: purchaseOrder.billPlacement ?? "",
-    paymentTerm: purchaseOrder.paymentTerm ?? "",
-    quotationNumber: purchaseOrder.quotationNumber ?? "",
-    quotationDate: purchaseOrder.quotationDate
-      ? purchaseOrder.quotationDate.toISOString().slice(0, 10)
-      : "",
-    contactName: purchaseOrder.contactName ?? "",
-    contactPhone: purchaseOrder.contactPhone ?? "",
-    contactMobile: purchaseOrder.contactMobile ?? "",
-    acceptanceCondition: purchaseOrder.acceptanceCondition ?? "",
-    note: purchaseOrder.note ?? "",
-    status: purchaseOrder.status,
+    header: {
+      poNumber: purchaseOrder.poNumber,
+      customerId: purchaseOrder.customerId,
+      plant: purchaseOrder.plant ?? "",
+      poDate: toDateInputValue(purchaseOrder.poDate),
+      deliveryDate: toDateInputValue(purchaseOrder.deliveryDate),
+      deliveryPlace: purchaseOrder.deliveryPlace ?? "",
+      billPlacement: purchaseOrder.billPlacement ?? "",
+      paymentTerm: purchaseOrder.paymentTerm ?? "",
+      quotationNumber: purchaseOrder.quotationNumber ?? "",
+      quotationDate: toDateInputValue(purchaseOrder.quotationDate),
+      contactName: purchaseOrder.contactName ?? "",
+      contactPhone: purchaseOrder.contactPhone ?? "",
+      contactMobile: purchaseOrder.contactMobile ?? "",
+      acceptanceCondition: purchaseOrder.acceptanceCondition ?? "",
+      note: purchaseOrder.note ?? "",
+      status: purchaseOrder.status,
+    },
     items: purchaseOrder.items.map((item) => ({
       id: item.id,
-      itemNo: item.itemNo,
       description: item.description,
       quantity: Number(item.quantity),
       unit: item.unit ?? "",
       unitPrice: Number(item.unitPrice),
-      discount: Number(item.discount),
-      discountType: item.discountType,
+      discount: formatDiscountInput(item.discount, item.discountType),
       vat: Number(item.vat),
-      amount: Number(item.amount),
     })),
   };
 
   return (
-    <main className="min-h-screen bg-slate-100 p-6">
+    <main className="p-6">
       <div className="mx-auto max-w-7xl">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-800">
-            แก้ไข Purchase Order
-          </h1>
+          <h1 className="text-2xl font-bold text-slate-800">แก้ไข Purchase Order</h1>
 
-          <p className="mt-1 text-sm text-slate-500">
-            แก้ไขข้อมูล PO และรายการสินค้า
-          </p>
+          <p className="mt-1 text-sm text-slate-500">แก้ไขข้อมูล PO และรายการสินค้า</p>
         </div>
 
-        <PurchaseOrderForm
-          customers={customers}
-          initialData={initialData}
-        />
+        <PurchaseOrderForm customers={customers} initialData={initialData} lock={lock} />
       </div>
     </main>
   );

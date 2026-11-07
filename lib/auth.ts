@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { redirect } from "next/navigation";
+import { connection } from "next/server";
 
 import { ApiError } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
@@ -90,6 +91,10 @@ export default authOptions;
  * The JWT alone is not enough: an account disabled after login would keep working until expiry.
  */
 export async function getActiveSession(): Promise<Session | null> {
+  // next-auth generates a random CSRF token for visitors without one. Under cacheComponents
+  // that random value must not be reached while prerendering, so wait for the request first.
+  await connection();
+
   const session = await getServerSession(authOptions);
 
   if (!session?.user?.id) {

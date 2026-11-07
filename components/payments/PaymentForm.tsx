@@ -1,37 +1,58 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+
+import { formatMoney, todayInputValue } from "@/lib/format";
+import { PAYMENT_METHODS, type PaymentMethod } from "@/lib/labels";
+import { compareMoney } from "@/lib/money";
+import { exceedsRemainingMessage, parsePaymentAmount, parsePaymentDate } from "@/lib/payments";
 
 type PaymentFormProps = {
   invoice: {
     id: string;
     invoiceNumber: string;
-    invoiceDate: string;
+    customerName: string;
     grandTotal: number;
     totalPaid: number;
+    /** Exact outstanding amount (2 decimals), from paymentSummary. */
     remainingAmount: number;
-    customerName: string;
   };
+  /** Why this invoice cannot receive a payment (draft, cancelled, paid), or null. */
+  blockedReason: string | null;
+  /** Used as "ผู้รับเงิน" when the field is left blank. */
+  currentUserName: string;
 };
+
+/** Reads `{ error }` from a response; returns null when the body is not JSON (e.g. an HTML error page). */
+async function readErrorMessage(response: Response): Promise<string | null> {
+  try {
+    const data: unknown = await response.json();
+    if (data && typeof data === "object" && "error" in data && typeof data.error === "string") {
+      return data.error;
+    }
+  } catch {
+    // not JSON
+  }
+  return null;
+}
 
 export default function PaymentForm({
   invoice,
+  blockedReason,
+  currentUserName,
 }: PaymentFormProps) {
   const router = useRouter();
 
-  const [paymentDate, setPaymentDate] = useState(() => {
-    const today = new Date();
+  const [paymentDate, setPaymentDate] = useState(todayInputValue);
 
-    return today.toISOString().split("T")[0];
-  });
-
+  // Exact remaining amount, so submitting the prefilled value always settles the invoice.
   const [amount, setAmount] = useState(
     invoice.remainingAmount.toFixed(2)
   );
 
   const [paymentMethod, setPaymentMethod] =
-    useState("TRANSFER");
+    useState<PaymentMethod>("TRANSFER");
 
   const [referenceNumber, setReferenceNumber] =
     useState("");
@@ -45,12 +66,42 @@ export default function PaymentForm({
 
   const [error, setError] = useState("");
 
+  // Guards against a second submit before React re-renders the disabled button.
+  const submittingRef = useRef(false);
+
+  const canPay = !blockedReason && invoice.remainingAmount > 0;
+
   async function handleSubmit(
     event: FormEvent<HTMLFormElement>
   ) {
     event.preventDefault();
 
+    if (submittingRef.current || !canPay) {
+      return;
+    }
+
     setError("");
+
+    const parsedAmount = parsePaymentAmount(amount);
+
+    if ("error" in parsedAmount) {
+      setError(parsedAmount.error);
+      return;
+    }
+
+    if (compareMoney(parsedAmount.amount, invoice.remainingAmount) > 0) {
+      setError(exceedsRemainingMessage(invoice.remainingAmount));
+      return;
+    }
+
+    const parsedDate = parsePaymentDate(paymentDate);
+
+    if ("error" in parsedDate) {
+      setError(parsedDate.error);
+      return;
+    }
+
+    submittingRef.current = true;
     setLoading(true);
 
     try {
@@ -64,7 +115,7 @@ export default function PaymentForm({
           body: JSON.stringify({
             invoiceId: invoice.id,
             paymentDate,
-            amount: Number(amount),
+            amount: parsedAmount.amount,
             paymentMethod,
             referenceNumber,
             note,
@@ -73,19 +124,23 @@ export default function PaymentForm({
         }
       );
 
-      const data = await response.json();
-
       if (!response.ok) {
+        const message = await readErrorMessage(response);
+
         setError(
-          data.error ||
-            "ไม่สามารถบันทึกการรับชำระเงินได้"
+          message ||
+            `ไม่สามารถบันทึกการรับชำระเงินได้ (รหัส ${response.status})`
         );
 
+        submittingRef.current = false;
+        setLoading(false);
         return;
       }
 
       alert("บันทึกการรับชำระเงินสำเร็จ");
 
+      // Keep the button disabled (loading stays true) until the invoice page has loaded,
+      // otherwise a second click during navigation would record the payment twice.
       router.push(
         `/invoices/${invoice.id}`
       );
@@ -97,7 +152,8 @@ export default function PaymentForm({
       setError(
         "เกิดข้อผิดพลาดในการเชื่อมต่อระบบ"
       );
-    } finally {
+
+      submittingRef.current = false;
       setLoading(false);
     }
   }
@@ -143,14 +199,7 @@ export default function PaymentForm({
             </p>
 
             <p className="font-semibold text-slate-800">
-              {invoice.grandTotal.toLocaleString(
-                "th-TH",
-                {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                }
-              )}{" "}
-              บาท
+              {formatMoney(invoice.grandTotal)} บาท
             </p>
           </div>
 
@@ -160,14 +209,7 @@ export default function PaymentForm({
             </p>
 
             <p className="font-semibold text-emerald-600">
-              {invoice.totalPaid.toLocaleString(
-                "th-TH",
-                {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                }
-              )}{" "}
-              บาท
+              {formatMoney(invoice.totalPaid)} บาท
             </p>
           </div>
 
@@ -177,18 +219,21 @@ export default function PaymentForm({
             </p>
 
             <p className="text-2xl font-bold text-red-600">
-              {invoice.remainingAmount.toLocaleString(
-                "th-TH",
-                {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                }
-              )}{" "}
-              บาท
+              {formatMoney(invoice.remainingAmount)} บาท
             </p>
           </div>
         </div>
       </div>
+
+      {/* ===================================== */}
+      {/* Invoice cannot receive payments */}
+      {/* ===================================== */}
+
+      {blockedReason && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          {blockedReason}
+        </div>
+      )}
 
       {/* ===================================== */}
       {/* Payment Information */}
@@ -210,6 +255,7 @@ export default function PaymentForm({
             <input
               type="date"
               value={paymentDate}
+              max={todayInputValue()}
               onChange={(event) =>
                 setPaymentDate(
                   event.target.value
@@ -230,6 +276,7 @@ export default function PaymentForm({
             <input
               type="number"
               min="0.01"
+              max={invoice.remainingAmount.toFixed(2)}
               step="0.01"
               value={amount}
               onChange={(event) =>
@@ -241,12 +288,7 @@ export default function PaymentForm({
 
             <p className="mt-1 text-xs text-slate-500">
               ยอดคงเหลือสูงสุด{" "}
-              {invoice.remainingAmount.toLocaleString(
-                "th-TH",
-                {
-                  minimumFractionDigits: 2,
-                }
-              )}{" "}
+              {formatMoney(invoice.remainingAmount)}{" "}
               บาท
             </p>
           </div>
@@ -262,31 +304,17 @@ export default function PaymentForm({
               value={paymentMethod}
               onChange={(event) =>
                 setPaymentMethod(
-                  event.target.value
+                  event.target.value as PaymentMethod
                 )
               }
               required
               className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-blue-500"
             >
-              <option value="TRANSFER">
-                โอนเงิน
-              </option>
-
-              <option value="CASH">
-                เงินสด
-              </option>
-
-              <option value="CHEQUE">
-                เช็ค
-              </option>
-
-              <option value="CREDIT_CARD">
-                บัตรเครดิต
-              </option>
-
-              <option value="OTHER">
-                อื่น ๆ
-              </option>
+              {PAYMENT_METHODS.map((method) => (
+                <option key={method.value} value={method.value}>
+                  {method.label}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -325,7 +353,11 @@ export default function PaymentForm({
                   event.target.value
                 )
               }
-              placeholder="ชื่อผู้รับเงิน"
+              placeholder={
+                currentUserName
+                  ? `เว้นว่างไว้ = ${currentUserName}`
+                  : "ชื่อผู้รับเงิน"
+              }
               className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-blue-500"
             />
           </div>
@@ -380,10 +412,7 @@ export default function PaymentForm({
 
         <button
           type="submit"
-          disabled={
-            loading ||
-            invoice.remainingAmount <= 0
-          }
+          disabled={loading || !canPay}
           className="rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {loading

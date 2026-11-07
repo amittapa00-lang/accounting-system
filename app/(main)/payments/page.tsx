@@ -1,99 +1,34 @@
 import Link from "next/link";
-import { getServerSession } from "next-auth";
-import { redirect } from "next/navigation";
 
-import authOptions from "@/lib/auth";
+import { requirePageSession } from "@/lib/auth";
+import { formatDate, formatMoney } from "@/lib/format";
+import { invoiceStatusClass, invoiceStatusLabel, paymentMethodLabel } from "@/lib/labels";
+import { sumMoney } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 
 export const instant = false;
 
 export default async function PaymentsPage() {
-  const session = await getServerSession(authOptions);
-
-  if (!session) {
-    redirect("/login");
-  }
+  await requirePageSession();
 
   const payments = await prisma.payment.findMany({
-    orderBy: {
-      paymentDate: "desc",
-    },
+    // createdAt breaks ties so payments on the same day keep a stable order
+    orderBy: [{ paymentDate: "desc" }, { createdAt: "desc" }],
     include: {
       invoice: {
         select: {
           id: true,
           invoiceNumber: true,
           customerNameSnapshot: true,
-          grandTotal: true,
           status: true,
         },
       },
     },
   });
 
-  const totalPayment = payments.reduce(
-    (sum, payment) => sum + Number(payment.amount),
-    0
-  );
+  const totalPayment = sumMoney(payments.map((payment) => payment.amount));
 
-  function formatMoney(value: number) {
-    return value.toLocaleString("th-TH", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
-  }
-
-  function formatDate(value: Date) {
-    return value.toLocaleDateString("th-TH", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    });
-  }
-
-  function getPaymentMethodLabel(method: string) {
-    switch (method) {
-      case "TRANSFER":
-        return "โอนเงิน";
-
-      case "CASH":
-        return "เงินสด";
-
-      case "CHEQUE":
-        return "เช็ค";
-
-      case "CREDIT_CARD":
-        return "บัตรเครดิต";
-
-      case "OTHER":
-        return "อื่น ๆ";
-
-      default:
-        return method;
-    }
-  }
-
-  function getStatusLabel(status: string) {
-    switch (status) {
-      case "PAID":
-        return "ชำระครบแล้ว";
-
-      case "PARTIAL":
-        return "ชำระบางส่วน";
-
-      case "ISSUED":
-        return "ออก Invoice แล้ว";
-
-      case "DRAFT":
-        return "ฉบับร่าง";
-
-      case "CANCELLED":
-        return "ยกเลิก";
-
-      default:
-        return status;
-    }
-  }
+  const invoiceCount = new Set(payments.map((payment) => payment.invoice.id)).size;
 
   return (
     <main className="min-h-screen bg-slate-100 p-6">
@@ -146,12 +81,7 @@ export default async function PaymentsPage() {
             </p>
 
             <p className="mt-2 text-2xl font-bold text-blue-600">
-              {
-                new Set(
-                  payments.map((payment) => payment.invoice.id)
-                ).size
-              }{" "}
-              ใบ
+              {invoiceCount.toLocaleString("th-TH")} ใบ
             </p>
           </div>
         </div>
@@ -234,12 +164,12 @@ export default async function PaymentsPage() {
 
                       {/* Amount */}
                       <td className="whitespace-nowrap px-4 py-3 text-right font-semibold text-emerald-600">
-                        {formatMoney(Number(payment.amount))} บาท
+                        {formatMoney(payment.amount)} บาท
                       </td>
 
                       {/* Payment Method */}
                       <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                        {getPaymentMethodLabel(payment.paymentMethod)}
+                        {paymentMethodLabel(payment.paymentMethod)}
                       </td>
 
                       {/* Reference */}
@@ -250,19 +180,11 @@ export default async function PaymentsPage() {
                       {/* Invoice Status */}
                       <td className="px-4 py-3 text-center">
                         <span
-                          className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
-                            payment.invoice.status === "PAID"
-                              ? "bg-emerald-100 text-emerald-700"
-                              : payment.invoice.status === "PARTIAL"
-                                ? "bg-blue-100 text-blue-700"
-                                : payment.invoice.status === "ISSUED"
-                                  ? "bg-amber-100 text-amber-700"
-                                  : payment.invoice.status === "CANCELLED"
-                                    ? "bg-red-100 text-red-700"
-                                    : "bg-slate-100 text-slate-700"
-                          }`}
+                          className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${invoiceStatusClass(
+                            payment.invoice.status
+                          )}`}
                         >
-                          {getStatusLabel(payment.invoice.status)}
+                          {invoiceStatusLabel(payment.invoice.status)}
                         </span>
                       </td>
 

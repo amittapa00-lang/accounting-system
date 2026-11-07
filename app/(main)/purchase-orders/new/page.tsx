@@ -1,7 +1,4 @@
-import { getServerSession } from "next-auth";
-import { redirect } from "next/navigation";
-
-import authOptions from "@/lib/auth";
+import { requirePageSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 import PurchaseOrderForm from "@/components/purchase-orders/PurchaseOrderForm";
@@ -9,12 +6,9 @@ import PurchaseOrderForm from "@/components/purchase-orders/PurchaseOrderForm";
 export const instant = false;
 
 export default async function NewPurchaseOrderPage() {
-  const session = await getServerSession(authOptions);
+  await requirePageSession();
 
-  if (!session) {
-    redirect("/login");
-  }
-
+  // A new PO can only be created for an active customer
   const customers = await prisma.customer.findMany({
     where: {
       isActive: true,
@@ -26,9 +20,8 @@ export default async function NewPurchaseOrderPage() {
       address: true,
       tel: true,
       taxId: true,
-      branchType: true,
-      branchNumber: true,
       contactName: true,
+      isActive: true,
     },
     orderBy: {
       name: "asc",
@@ -36,16 +29,12 @@ export default async function NewPurchaseOrderPage() {
   });
 
   return (
-    <main className="min-h-screen bg-slate-100 p-6">
+    <main className="p-6">
       <div className="mx-auto max-w-7xl">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-800">
-            เพิ่ม Purchase Order
-          </h1>
+          <h1 className="text-2xl font-bold text-slate-800">เพิ่ม Purchase Order</h1>
 
-          <p className="mt-1 text-sm text-slate-500">
-            สร้างใบสั่งซื้อใหม่
-          </p>
+          <p className="mt-1 text-sm text-slate-500">สร้างใบสั่งซื้อใหม่</p>
         </div>
 
         <PurchaseOrderForm customers={customers} />

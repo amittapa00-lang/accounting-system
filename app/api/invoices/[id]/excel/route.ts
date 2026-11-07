@@ -1,184 +1,120 @@
-import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
 import fs from "fs/promises";
 import path from "path";
 import ExcelJS from "exceljs";
 
-import authOptions from "@/lib/auth";
+import { ApiError, handleApiError } from "@/lib/api";
+import { requireApiSession } from "@/lib/auth";
+import { bahtText } from "@/lib/bahtText";
+import { toDateInputValue } from "@/lib/format";
+import { INVOICE_EXCEL_MAX_ITEMS } from "@/lib/invoices";
+import { toNumber, type Numeric } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 
 type RouteContext = {
-  params: Promise<{
-    id: string;
-  }>;
+  params: Promise<{ id: string }>;
 };
 
-function numberToThaiText(number: number): string {
-  if (!Number.isFinite(number)) return "";
+/** First and last item rows of the template (J40 holds the subtotal). */
+const FIRST_ITEM_ROW = 18;
+const LAST_ITEM_ROW = FIRST_ITEM_ROW + INVOICE_EXCEL_MAX_ITEMS - 1; // 39
 
-  const rounded = Math.round(number * 100) / 100;
-  const baht = Math.floor(rounded);
-  const satang = Math.round((rounded - baht) * 100);
+const MONEY_FORMAT = "#,##0.00";
 
-  const numberNames = [
-    "",
-    "หนึ่ง",
-    "สอง",
-    "สาม",
-    "สี่",
-    "ห้า",
-    "หก",
-    "เจ็ด",
-    "แปด",
-    "เก้า",
-  ];
+/** Number format without a trailing "." for whole numbers ("#,##0.##" shows 5 as "5."). */
+function plainNumberFormat(value: number) {
+  return Number.isInteger(value) ? "#,##0" : "#,##0.####";
+}
 
-  function convert(value: number): string {
-    if (value === 0) return "";
+/** The invoice date as a pure date (UTC midnight of the Thai calendar day), so Excel shows the right day. */
+function excelDate(value: Date) {
+  return new Date(`${toDateInputValue(value)}T00:00:00Z`);
+}
 
-    if (value >= 1_000_000) {
-      const million = Math.floor(value / 1_000_000);
-      return convert(million) + "ล้าน" + convert(value % 1_000_000);
-    }
+function setDiscountCell(cell: ExcelJS.Cell, discount: Numeric, discountType: string) {
+  const value = toNumber(discount);
 
-    const positions = [
-      { value: Math.floor(value / 100_000), unit: "แสน" },
-      { value: Math.floor((value % 100_000) / 10_000), unit: "หมื่น" },
-      { value: Math.floor((value % 10_000) / 1_000), unit: "พัน" },
-      { value: Math.floor((value % 1_000) / 100), unit: "ร้อย" },
-      { value: Math.floor((value % 100) / 10), unit: "สิบ" },
-      { value: value % 10, unit: "" },
-    ];
-
-    let result = "";
-
-    for (const position of positions) {
-      const digit = position.value;
-
-      if (digit === 0) continue;
-
-      if (position.unit === "สิบ") {
-        if (digit === 1) result += "สิบ";
-        else if (digit === 2) result += "ยี่สิบ";
-        else result += numberNames[digit] + "สิบ";
-      } else if (position.unit === "") {
-        if (digit === 1 && value >= 10) result += "เอ็ด";
-        else result += numberNames[digit];
-      } else {
-        result += numberNames[digit] + position.unit;
-      }
-    }
-
-    return result;
+  if (value === 0) {
+    cell.value = null;
+    return;
   }
 
-  const bahtText = baht === 0 ? "ศูนย์" : convert(baht);
-  const satangText = satang === 0 ? "" : convert(satang);
+  if (discountType === "AMOUNT") {
+    cell.value = value;
+    cell.numFmt = MONEY_FORMAT;
+    return;
+  }
 
-  return satang === 0
-    ? `${bahtText}บาทถ้วน`
-    : `${bahtText}บาท${satangText}สตางค์`;
+  // Percent cells hold the fraction (5% = 0.05)
+  cell.value = value / 100;
+  cell.numFmt = Number.isInteger(value) ? "0%" : "0.####%";
 }
 
-function toNumber(value: unknown): number {
-  return Number(value ?? 0);
-}
-
-export async function GET(
-  _request: Request,
-  { params }: RouteContext
-) {
+export async function GET(_request: Request, { params }: RouteContext) {
   try {
-    const session = await getServerSession(authOptions);
-
-    if (!session) {
-      return NextResponse.json(
-        { message: "กรุณาเข้าสู่ระบบก่อน" },
-        { status: 401 }
-      );
-    }
+    await requireApiSession();
 
     const { id } = await params;
 
     const invoice = await prisma.invoice.findUnique({
       where: { id },
       include: {
-        purchaseOrder: true,
-        items: {
-          orderBy: { itemNo: "asc" },
-        },
+        purchaseOrder: { select: { poNumber: true } },
+        items: { orderBy: { itemNo: "asc" } },
       },
     });
 
     if (!invoice) {
-      return NextResponse.json(
-        { message: "ไม่พบ Invoice ที่ต้องการ" },
-        { status: 404 }
+      throw new ApiError(404, "ไม่พบ Invoice ที่ต้องการ");
+    }
+
+    if (invoice.status === "CANCELLED") {
+      throw new ApiError(409, "Invoice นี้ถูกยกเลิกแล้ว ไม่สามารถดาวน์โหลดได้");
+    }
+
+    if (invoice.items.length > INVOICE_EXCEL_MAX_ITEMS) {
+      throw new ApiError(
+        400,
+        `Invoice นี้มีสินค้าเกิน ${INVOICE_EXCEL_MAX_ITEMS} รายการ ซึ่งเกินพื้นที่ของแบบฟอร์ม Excel`
       );
     }
 
     // ไฟล์ Excel ต้นแบบ (อยู่นอก public/ เพื่อไม่ให้ดาวน์โหลดได้โดยไม่ล็อกอิน)
-    const templatePath = path.join(
-      process.cwd(),
-      "templates",
-      "invoice-template.xlsx"
-    );
-
+    const templatePath = path.join(process.cwd(), "templates", "invoice-template.xlsx");
     const templateBuffer = await fs.readFile(templatePath);
 
     const workbook = new ExcelJS.Workbook();
-
     await workbook.xlsx.load(templateBuffer as unknown as ExcelJS.Buffer);
 
     const worksheet = workbook.getWorksheet(1);
-
     if (!worksheet) {
       throw new Error("ไม่พบ Worksheet ในไฟล์ Excel ต้นแบบ");
     }
+
+    // C28:D29 is merged in the template. Writing to a merged cell writes to its top-left
+    // cell, so item 12 (row 29) would overwrite item 11's description (row 28).
+    worksheet.unMergeCells("C28:D29");
 
     // =====================================
     // ข้อมูลส่วนหัว Invoice
     // =====================================
 
     worksheet.getCell("J3").value = invoice.invoiceNumber;
-    worksheet.getCell("J4").value = invoice.invoiceDate;
-
-    worksheet.getCell("D7").value =
-      invoice.customerCodeSnapshot ?? "";
-
-    worksheet.getCell("B9").value =
-      invoice.customerNameSnapshot ?? "";
-
-    worksheet.getCell("B10").value =
-      invoice.customerAddressSnapshot ?? "";
-
+    worksheet.getCell("J4").value = excelDate(invoice.invoiceDate);
+    worksheet.getCell("D7").value = invoice.customerCodeSnapshot ?? "";
+    worksheet.getCell("B9").value = invoice.customerNameSnapshot ?? "";
+    worksheet.getCell("B10").value = invoice.customerAddressSnapshot ?? "";
     worksheet.getCell("B11").value = "";
-
-    worksheet.getCell("B12").value =
-      invoice.customerTaxIdSnapshot ?? "";
-
-    worksheet.getCell("G15").value =
-      `PO. No. ${invoice.purchaseOrder.poNumber}`;
+    worksheet.getCell("B12").value = invoice.customerTaxIdSnapshot ?? "";
+    worksheet.getCell("G15").value = `PO. No. ${invoice.purchaseOrder.poNumber}`;
 
     // =====================================
-    // ล้างรายการสินค้าเดิมในต้นแบบ
+    // ล้างพื้นที่รายการสินค้าในต้นแบบ
     // =====================================
 
-    for (let row = 18; row <= 39; row++) {
-      for (const column of ["B", "C", "F", "G", "H", "I", "J"]) {
+    for (let row = FIRST_ITEM_ROW; row <= LAST_ITEM_ROW; row++) {
+      for (const column of ["B", "C", "D", "F", "G", "H", "I", "J"]) {
         worksheet.getCell(`${column}${row}`).value = null;
       }
-    }
-
-    // ต้นแบบมีพื้นที่รายการสินค้า 22 แถว
-    if (invoice.items.length > 22) {
-      return NextResponse.json(
-        {
-          message:
-            "Invoice นี้มีสินค้าเกิน 22 รายการ กรุณาแบ่งเอกสารก่อนดาวน์โหลด",
-        },
-        { status: 400 }
-      );
     }
 
     // =====================================
@@ -186,39 +122,41 @@ export async function GET(
     // =====================================
 
     invoice.items.forEach((item, index) => {
-      const row = 18 + index;
+      const row = FIRST_ITEM_ROW + index;
+      const quantity = toNumber(item.quantity);
+      const unitPrice = toNumber(item.unitPrice);
 
       worksheet.getCell(`B${row}`).value = item.itemNo;
       worksheet.getCell(`C${row}`).value = item.description;
-      worksheet.getCell(`F${row}`).value = toNumber(item.quantity);
+
+      const quantityCell = worksheet.getCell(`F${row}`);
+      quantityCell.value = quantity;
+      quantityCell.numFmt = plainNumberFormat(quantity);
+
       worksheet.getCell(`G${row}`).value = item.unit ?? "";
-      worksheet.getCell(`H${row}`).value = toNumber(item.unitPrice);
-      worksheet.getCell(`I${row}`).value = toNumber(item.discount);
-      worksheet.getCell(`J${row}`).value = toNumber(item.amount);
+
+      const unitPriceCell = worksheet.getCell(`H${row}`);
+      unitPriceCell.value = unitPrice;
+      unitPriceCell.numFmt = MONEY_FORMAT;
+
+      setDiscountCell(worksheet.getCell(`I${row}`), item.discount, item.discountType);
+
+      const amountCell = worksheet.getCell(`J${row}`);
+      amountCell.value = toNumber(item.amount);
+      amountCell.numFmt = MONEY_FORMAT;
     });
 
     // =====================================
-    // ยอดเงิน
+    // ยอดเงิน (ค่าที่บันทึกไว้ใน Invoice)
     // =====================================
 
     worksheet.getCell("J40").value = toNumber(invoice.subtotal);
     worksheet.getCell("J42").value = toNumber(invoice.vat);
     worksheet.getCell("J43").value = toNumber(invoice.grandTotal);
-
-    worksheet.getCell("B43").value = numberToThaiText(
-      toNumber(invoice.grandTotal)
-    );
-
-    // ตั้งค่ารูปแบบตัวเลข
-    for (let row = 18; row <= 39; row++) {
-      worksheet.getCell(`F${row}`).numFmt = "#,##0.##";
-      worksheet.getCell(`H${row}`).numFmt = "#,##0.00";
-      worksheet.getCell(`I${row}`).numFmt = "#,##0.##";
-      worksheet.getCell(`J${row}`).numFmt = "#,##0.00";
-    }
+    worksheet.getCell("B43").value = bahtText(invoice.grandTotal);
 
     for (const cell of ["J40", "J42", "J43"]) {
-      worksheet.getCell(cell).numFmt = "#,##0.00";
+      worksheet.getCell(cell).numFmt = MONEY_FORMAT;
     }
 
     // ตั้งค่าพิมพ์ A4
@@ -235,25 +173,17 @@ export async function GET(
 
     const fileBuffer = await workbook.xlsx.writeBuffer();
 
-    const fileName = `Invoice-${invoice.invoiceNumber}.xlsx`;
-    const encodedFileName = encodeURIComponent(fileName);
+    const fileName = `Invoice-${invoice.invoiceNumber.replace(/[\\/:*?"<>|]/g, "-")}.xlsx`;
 
-    return new NextResponse(Buffer.from(fileBuffer), {
+    return new Response(Buffer.from(fileBuffer), {
       status: 200,
       headers: {
-        "Content-Type":
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "Content-Disposition":
-          `attachment; filename="invoice.xlsx"; filename*=UTF-8''${encodedFileName}`,
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": `attachment; filename="invoice.xlsx"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
         "Cache-Control": "no-store",
       },
     });
   } catch (error) {
-    console.error("Excel Invoice Error:", error);
-
-    return NextResponse.json(
-      { message: "ไม่สามารถสร้างไฟล์ Excel ได้ กรุณาตรวจสอบไฟล์ต้นแบบ" },
-      { status: 500 }
-    );
+    return handleApiError(error, "ไม่สามารถสร้างไฟล์ Excel ได้ กรุณาตรวจสอบไฟล์ต้นแบบ");
   }
 }

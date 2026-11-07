@@ -1,9 +1,20 @@
 import Link from "next/link";
-import { getServerSession } from "next-auth";
-import { notFound, redirect } from "next/navigation";
-import authOptions from "@/lib/auth";
+import { notFound } from "next/navigation";
+
+import { requirePageSession } from "@/lib/auth";
+import { formatDate, formatMoney } from "@/lib/format";
+import { formatLineDiscount, formatQuantity, isBilledInvoiceStatus } from "@/lib/invoices";
+import {
+  documentTypeLabel,
+  invoiceStatusClass,
+  invoiceStatusLabel,
+  OPEN_INVOICE_STATUSES,
+  paymentMethodLabel,
+} from "@/lib/labels";
+import { paymentSummary } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
-import IssueInvoiceButton from "@/components/invoices/IssueInvoiceButton";
+
+import DraftInvoiceActions from "@/components/invoices/DraftInvoiceActions";
 
 export const instant = false;
 
@@ -13,108 +24,8 @@ type PageProps = {
   }>;
 };
 
-function formatMoney(value: number) {
-  return value.toLocaleString("th-TH", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
-function formatDate(value: Date) {
-  return value.toLocaleDateString("th-TH", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
-}
-
-function getDocumentTypeLabel(type: string) {
-  switch (type) {
-    case "TAX_INVOICE_DELIVERY":
-      return "ใบกำกับภาษี / ใบส่งของ / ใบแจ้งหนี้";
-
-    case "BILLING_INVOICE":
-      return "ใบวางบิล / ใบแจ้งหนี้";
-
-    case "RECEIPT":
-      return "ใบเสร็จรับเงิน";
-
-    default:
-      return type;
-  }
-}
-
-function getPaymentMethodLabel(method: string) {
-  switch (method) {
-    case "TRANSFER":
-      return "โอนเงิน";
-
-    case "CASH":
-      return "เงินสด";
-
-    case "CHEQUE":
-      return "เช็ค";
-
-    case "CREDIT_CARD":
-      return "บัตรเครดิต";
-
-    case "OTHER":
-      return "อื่น ๆ";
-
-    default:
-      return method;
-  }
-}
-
-function getStatusLabel(status: string) {
-  switch (status) {
-    case "DRAFT":
-      return "ฉบับร่าง";
-
-    case "ISSUED":
-      return "ออก Invoice แล้ว";
-
-    case "PARTIAL":
-      return "ชำระบางส่วน";
-
-    case "PAID":
-      return "ชำระครบแล้ว";
-
-    case "CANCELLED":
-      return "ยกเลิก";
-
-    default:
-      return status;
-  }
-}
-
-function getStatusClass(status: string) {
-  switch (status) {
-    case "PAID":
-      return "bg-emerald-100 text-emerald-700";
-
-    case "PARTIAL":
-      return "bg-blue-100 text-blue-700";
-
-    case "ISSUED":
-      return "bg-amber-100 text-amber-700";
-
-    case "CANCELLED":
-      return "bg-red-100 text-red-700";
-
-    default:
-      return "bg-slate-100 text-slate-700";
-  }
-}
-
-export default async function InvoiceDetailPage({
-  params,
-}: PageProps) {
-  const session = await getServerSession(authOptions);
-
-  if (!session) {
-    redirect("/login");
-  }
+export default async function InvoiceDetailPage({ params }: PageProps) {
+  await requirePageSession();
 
   const { id } = await params;
 
@@ -153,40 +64,36 @@ export default async function InvoiceDetailPage({
   }
 
   // ==========================================
-  // คำนวณยอดรับชำระ
+  // ยอดรับชำระ (คำนวณเป็นสตางค์ ไม่มีเศษทศนิยมคลาดเคลื่อน)
   // ==========================================
 
-  const totalPaid = invoice.payments.reduce(
-    (sum, payment) => sum + Number(payment.amount),
-    0
+  const {
+    paid: totalPaid,
+    remaining: remainingAmount,
+    isFullyPaid,
+  } = paymentSummary(
+    invoice.grandTotal,
+    invoice.payments.map((payment) => payment.amount)
   );
 
-  const grandTotal = Number(invoice.grandTotal);
+  // รับชำระได้เฉพาะ Invoice ที่ออกแล้วและยังชำระไม่ครบ
+  const canReceivePayment =
+    (OPEN_INVOICE_STATUSES as string[]).includes(invoice.status) && remainingAmount > 0;
 
-  const remainingAmount = grandTotal - totalPaid;
-
-  // ==========================================
-  // สถานะวางบิล / รับเงิน
-  // ==========================================
-
-  const isFullyPaid = grandTotal > 0 && remainingAmount <= 0.005;
-  const hasPayment = totalPaid > 0;
+  const isCancelled = invoice.status === "CANCELLED";
 
   // ถือว่า "วางบิลแล้ว" เมื่อออก Invoice แล้ว (ไม่ใช่ฉบับร่าง/ยกเลิก)
-  const isBilled =
-    invoice.status !== "DRAFT" && invoice.status !== "CANCELLED";
+  const isBilled = isBilledInvoiceStatus(invoice.status);
 
-  const paymentStateLabel = isFullyPaid
-    ? "รับเงินแล้ว"
-    : hasPayment
-    ? "รับเงินบางส่วน"
-    : "ยังไม่ได้รับเงิน";
+  const hasPayment = totalPaid > 0;
+
+  const paymentStateLabel = isFullyPaid ? "รับเงินแล้ว" : hasPayment ? "รับเงินบางส่วน" : "ยังไม่ได้รับเงิน";
 
   const paymentStateClass = isFullyPaid
     ? "bg-emerald-100 text-emerald-700"
     : hasPayment
-    ? "bg-blue-100 text-blue-700"
-    : "bg-slate-100 text-slate-700";
+      ? "bg-blue-100 text-blue-700"
+      : "bg-slate-100 text-slate-700";
 
   return (
     <main className="min-h-screen bg-slate-100 p-6">
@@ -197,16 +104,12 @@ export default async function InvoiceDetailPage({
 
         <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-center">
           <div>
-            <h1 className="text-2xl font-bold text-slate-800">
-              Invoice {invoice.invoiceNumber}
-            </h1>
+            <h1 className="text-2xl font-bold text-slate-800">Invoice {invoice.invoiceNumber}</h1>
 
-            <p className="mt-1 text-sm text-slate-500">
-              รายละเอียด Invoice
-            </p>
+            <p className="mt-1 text-sm text-slate-500">รายละเอียด Invoice</p>
           </div>
 
-          <div className="flex flex-wrap gap-3">
+          <div className="flex flex-wrap items-start gap-3">
             <Link
               href="/invoices"
               className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
@@ -221,11 +124,9 @@ export default async function InvoiceDetailPage({
               ดู Purchase Order
             </Link>
 
-            {invoice.status === "DRAFT" && (
-              <IssueInvoiceButton invoiceId={invoice.id} />
-            )}
+            {invoice.status === "DRAFT" && <DraftInvoiceActions invoiceId={invoice.id} />}
 
-            {remainingAmount > 0 && invoice.status !== "DRAFT" && (
+            {canReceivePayment && (
               <Link
                 href={`/payments/new?invoiceId=${invoice.id}`}
                 className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
@@ -234,15 +135,23 @@ export default async function InvoiceDetailPage({
               </Link>
             )}
 
-            <Link
-              href={`/invoices/${invoice.id}/print`}
-              target="_blank"
-              className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-            >
-              🖨️ พิมพ์ / PDF
-            </Link>
+            {!isCancelled && (
+              <Link
+                href={`/invoices/${invoice.id}/print`}
+                target="_blank"
+                className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+              >
+                🖨️ พิมพ์ / PDF
+              </Link>
+            )}
           </div>
         </div>
+
+        {isCancelled && (
+          <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            Invoice นี้ถูกยกเลิกแล้ว ไม่สามารถพิมพ์หรือรับชำระเงินได้
+          </div>
+        )}
 
         {/* ================================== */}
         {/* Invoice Information */}
@@ -252,68 +161,50 @@ export default async function InvoiceDetailPage({
           {/* Document */}
 
           <div className="rounded-xl border border-slate-200 bg-white p-6">
-            <h2 className="mb-4 text-lg font-bold text-slate-800">
-              ข้อมูลเอกสาร
-            </h2>
+            <h2 className="mb-4 text-lg font-bold text-slate-800">ข้อมูลเอกสาร</h2>
 
             <div className="space-y-3 text-sm">
               <div className="flex justify-between gap-4">
                 <span className="text-slate-500">Invoice No.</span>
 
-                <span className="font-semibold text-slate-800">
-                  {invoice.invoiceNumber}
-                </span>
+                <span className="font-semibold text-slate-800">{invoice.invoiceNumber}</span>
               </div>
 
               <div className="flex justify-between gap-4">
                 <span className="text-slate-500">ประเภทเอกสาร</span>
 
-                <span className="text-right text-slate-800">
-                  {getDocumentTypeLabel(invoice.documentType)}
-                </span>
+                <span className="text-right text-slate-800">{documentTypeLabel(invoice.documentType)}</span>
               </div>
 
               <div className="flex justify-between gap-4">
                 <span className="text-slate-500">วันที่ Invoice</span>
 
-                <span className="text-slate-800">
-                  {formatDate(invoice.invoiceDate)}
-                </span>
+                <span className="text-slate-800">{formatDate(invoice.invoiceDate)}</span>
               </div>
 
               <div className="flex justify-between gap-4">
                 <span className="text-slate-500">วันครบกำหนด</span>
 
-                <span className="text-slate-800">
-                  {invoice.dueDate ? formatDate(invoice.dueDate) : "-"}
-                </span>
+                <span className="text-slate-800">{formatDate(invoice.dueDate)}</span>
               </div>
 
               <div className="flex justify-between gap-4">
                 <span className="text-slate-500">Payment Term</span>
 
-                <span className="text-slate-800">
-                  {invoice.paymentTerm || "-"}
-                </span>
+                <span className="text-slate-800">{invoice.paymentTerm || "-"}</span>
               </div>
 
               <div className="flex justify-between gap-4">
                 <span className="text-slate-500">Sale Order No.</span>
 
-                <span className="text-slate-800">
-                  {invoice.saleOrderNumber || "-"}
-                </span>
+                <span className="text-slate-800">{invoice.saleOrderNumber || "-"}</span>
               </div>
 
               <div className="flex items-center justify-between gap-4">
                 <span className="text-slate-500">สถานะ</span>
 
-                <span
-                  className={`rounded-full px-3 py-1 text-xs font-semibold ${getStatusClass(
-                    invoice.status
-                  )}`}
-                >
-                  {getStatusLabel(invoice.status)}
+                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${invoiceStatusClass(invoice.status)}`}>
+                  {invoiceStatusLabel(invoice.status)}
                 </span>
               </div>
 
@@ -322,9 +213,7 @@ export default async function InvoiceDetailPage({
 
                 <span
                   className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                    isBilled
-                      ? "bg-emerald-100 text-emerald-700"
-                      : "bg-slate-100 text-slate-700"
+                    isBilled ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-700"
                   }`}
                 >
                   {isBilled ? "วางบิลแล้ว" : "ยังไม่วางบิล"}
@@ -334,9 +223,7 @@ export default async function InvoiceDetailPage({
               <div className="flex items-center justify-between gap-4">
                 <span className="text-slate-500">สถานะรับเงิน</span>
 
-                <span
-                  className={`rounded-full px-3 py-1 text-xs font-semibold ${paymentStateClass}`}
-                >
+                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${paymentStateClass}`}>
                   {paymentStateLabel}
                 </span>
               </div>
@@ -346,49 +233,37 @@ export default async function InvoiceDetailPage({
           {/* Customer */}
 
           <div className="rounded-xl border border-slate-200 bg-white p-6">
-            <h2 className="mb-4 text-lg font-bold text-slate-800">
-              ข้อมูลลูกค้า
-            </h2>
+            <h2 className="mb-4 text-lg font-bold text-slate-800">ข้อมูลลูกค้า</h2>
 
             <div className="space-y-3 text-sm">
               <div>
                 <p className="text-slate-500">รหัสลูกค้า</p>
 
-                <p className="font-semibold text-slate-800">
-                  {invoice.customerCodeSnapshot || "-"}
-                </p>
+                <p className="font-semibold text-slate-800">{invoice.customerCodeSnapshot || "-"}</p>
               </div>
 
               <div>
                 <p className="text-slate-500">ชื่อลูกค้า</p>
 
-                <p className="font-semibold text-slate-800">
-                  {invoice.customerNameSnapshot}
-                </p>
+                <p className="font-semibold text-slate-800">{invoice.customerNameSnapshot}</p>
               </div>
 
               <div>
                 <p className="text-slate-500">ที่อยู่</p>
 
-                <p className="whitespace-pre-wrap text-slate-800">
-                  {invoice.customerAddressSnapshot || "-"}
-                </p>
+                <p className="whitespace-pre-wrap text-slate-800">{invoice.customerAddressSnapshot || "-"}</p>
               </div>
 
               <div>
                 <p className="text-slate-500">เลขประจำตัวผู้เสียภาษี</p>
 
-                <p className="text-slate-800">
-                  {invoice.customerTaxIdSnapshot || "-"}
-                </p>
+                <p className="text-slate-800">{invoice.customerTaxIdSnapshot || "-"}</p>
               </div>
 
               <div>
                 <p className="text-slate-500">สถานที่จัดส่ง</p>
 
-                <p className="whitespace-pre-wrap text-slate-800">
-                  {invoice.shipToSnapshot || "-"}
-                </p>
+                <p className="whitespace-pre-wrap text-slate-800">{invoice.shipToSnapshot || "-"}</p>
               </div>
             </div>
           </div>
@@ -397,39 +272,30 @@ export default async function InvoiceDetailPage({
 
           <div className="rounded-xl border border-slate-200 bg-white p-6 lg:col-span-2">
             <h2 className="mb-4 text-lg font-bold text-slate-800">
-              ข้อมูลผู้ติดต่อและเงื่อนไข (จาก PO{" "}
-              {invoice.purchaseOrder.poNumber})
+              ข้อมูลผู้ติดต่อและเงื่อนไข (จาก PO {invoice.purchaseOrder.poNumber})
             </h2>
 
             <div className="grid gap-4 text-sm md:grid-cols-2">
               <div>
                 <p className="text-slate-500">โทรศัพท์ผู้ติดต่อ</p>
 
-                <p className="text-slate-800">
-                  {invoice.purchaseOrder.contactPhone || "-"}
-                </p>
+                <p className="text-slate-800">{invoice.purchaseOrder.contactPhone || "-"}</p>
               </div>
 
               <div>
                 <p className="text-slate-500">มือถือผู้ติดต่อ</p>
 
-                <p className="text-slate-800">
-                  {invoice.purchaseOrder.contactMobile || "-"}
-                </p>
+                <p className="text-slate-800">{invoice.purchaseOrder.contactMobile || "-"}</p>
               </div>
 
               <div>
                 <p className="text-slate-500">สถานที่วางบิล</p>
 
-                <p className="whitespace-pre-wrap text-slate-800">
-                  {invoice.purchaseOrder.billPlacement || "-"}
-                </p>
+                <p className="whitespace-pre-wrap text-slate-800">{invoice.purchaseOrder.billPlacement || "-"}</p>
               </div>
 
               <div>
-                <p className="text-slate-500">
-                  เงื่อนไขการรับสินค้า / ตรวจรับ
-                </p>
+                <p className="text-slate-500">เงื่อนไขการรับสินค้า / ตรวจรับ</p>
 
                 <p className="whitespace-pre-wrap text-slate-800">
                   {invoice.purchaseOrder.acceptanceCondition || "-"}
@@ -439,9 +305,7 @@ export default async function InvoiceDetailPage({
               <div className="md:col-span-2">
                 <p className="text-slate-500">หมายเหตุ</p>
 
-                <p className="whitespace-pre-wrap text-slate-800">
-                  {invoice.purchaseOrder.note || "-"}
-                </p>
+                <p className="whitespace-pre-wrap text-slate-800">{invoice.purchaseOrder.note || "-"}</p>
               </div>
             </div>
           </div>
@@ -453,75 +317,41 @@ export default async function InvoiceDetailPage({
 
         <div className="mb-6 overflow-hidden rounded-xl border border-slate-200 bg-white">
           <div className="border-b border-slate-200 px-6 py-4">
-            <h2 className="text-lg font-bold text-slate-800">
-              รายการสินค้า
-            </h2>
+            <h2 className="text-lg font-bold text-slate-800">รายการสินค้า</h2>
           </div>
 
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead className="bg-slate-50">
                 <tr className="border-b border-slate-200">
-                  <th className="px-4 py-3 text-center font-semibold text-slate-700">
-                    #
-                  </th>
-
-                  <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                    รายละเอียด
-                  </th>
-
-                  <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                    จำนวน
-                  </th>
-
-                  <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                    หน่วย
-                  </th>
-
-                  <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                    ราคาต่อหน่วย
-                  </th>
-
-                  <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                    ส่วนลด %
-                  </th>
-
-                  <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                    จำนวนเงิน
-                  </th>
+                  <th className="px-4 py-3 text-center font-semibold text-slate-700">#</th>
+                  <th className="px-4 py-3 text-left font-semibold text-slate-700">รายละเอียด</th>
+                  <th className="px-4 py-3 text-right font-semibold text-slate-700">จำนวน</th>
+                  <th className="px-4 py-3 text-left font-semibold text-slate-700">หน่วย</th>
+                  <th className="px-4 py-3 text-right font-semibold text-slate-700">ราคาต่อหน่วย</th>
+                  <th className="px-4 py-3 text-right font-semibold text-slate-700">ส่วนลด</th>
+                  <th className="px-4 py-3 text-right font-semibold text-slate-700">จำนวนเงิน</th>
                 </tr>
               </thead>
 
               <tbody>
                 {invoice.items.map((item) => (
                   <tr key={item.id} className="border-b border-slate-100">
-                    <td className="px-4 py-3 text-center text-slate-600">
-                      {item.itemNo}
-                    </td>
+                    <td className="px-4 py-3 text-center text-slate-600">{item.itemNo}</td>
 
-                    <td className="px-4 py-3 text-slate-800">
-                      {item.description}
-                    </td>
+                    <td className="whitespace-pre-line px-4 py-3 text-slate-800">{item.description}</td>
 
-                    <td className="px-4 py-3 text-right text-slate-700">
-                      {Number(item.quantity).toLocaleString("th-TH")}
-                    </td>
+                    <td className="px-4 py-3 text-right text-slate-700">{formatQuantity(item.quantity)}</td>
 
-                    <td className="px-4 py-3 text-slate-700">
-                      {item.unit || "-"}
-                    </td>
+                    <td className="px-4 py-3 text-slate-700">{item.unit || "-"}</td>
+
+                    <td className="px-4 py-3 text-right text-slate-700">{formatMoney(item.unitPrice)}</td>
 
                     <td className="px-4 py-3 text-right text-slate-700">
-                      {formatMoney(Number(item.unitPrice))}
+                      {formatLineDiscount(item.discount, item.discountType) || "-"}
                     </td>
 
-                    <td className="px-4 py-3 text-right text-slate-700">
-                      {Number(item.discount).toLocaleString("th-TH")}%
-                    </td>
-
-                    <td className="px-4 py-3 text-right font-medium text-slate-800">
-                      {formatMoney(Number(item.amount))}
-                    </td>
+                    <td className="px-4 py-3 text-right font-medium text-slate-800">{formatMoney(item.amount)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -538,29 +368,21 @@ export default async function InvoiceDetailPage({
             <div className="flex justify-between py-2 text-sm">
               <span className="text-slate-500">Subtotal</span>
 
-              <span className="font-medium text-slate-800">
-                {formatMoney(Number(invoice.subtotal))} บาท
-              </span>
+              <span className="font-medium text-slate-800">{formatMoney(invoice.subtotal)} บาท</span>
             </div>
 
             <div className="flex justify-between py-2 text-sm">
               <span className="text-slate-500">VAT</span>
 
-              <span className="font-medium text-slate-800">
-                {formatMoney(Number(invoice.vat))} บาท
-              </span>
+              <span className="font-medium text-slate-800">{formatMoney(invoice.vat)} บาท</span>
             </div>
 
             <div className="my-2 border-t border-slate-200" />
 
             <div className="flex justify-between py-2">
-              <span className="font-bold text-slate-800">
-                ยอดรวมทั้งสิ้น
-              </span>
+              <span className="font-bold text-slate-800">ยอดรวมทั้งสิ้น</span>
 
-              <span className="text-xl font-bold text-slate-800">
-                {formatMoney(grandTotal)} บาท
-              </span>
+              <span className="text-xl font-bold text-slate-800">{formatMoney(invoice.grandTotal)} บาท</span>
             </div>
           </div>
         </div>
@@ -573,40 +395,24 @@ export default async function InvoiceDetailPage({
           <div className="rounded-xl border border-slate-200 bg-white p-5">
             <p className="text-sm text-slate-500">ยอด Invoice</p>
 
-            <p className="mt-2 text-2xl font-bold text-slate-800">
-              {formatMoney(grandTotal)} บาท
-            </p>
+            <p className="mt-2 text-2xl font-bold text-slate-800">{formatMoney(invoice.grandTotal)} บาท</p>
           </div>
 
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5">
             <p className="text-sm text-emerald-700">ชำระแล้ว</p>
 
-            <p className="mt-2 text-2xl font-bold text-emerald-700">
-              {formatMoney(totalPaid)} บาท
-            </p>
+            <p className="mt-2 text-2xl font-bold text-emerald-700">{formatMoney(totalPaid)} บาท</p>
           </div>
 
           <div
             className={`rounded-xl border p-5 ${
-              remainingAmount > 0
-                ? "border-red-200 bg-red-50"
-                : "border-emerald-200 bg-emerald-50"
+              remainingAmount > 0 ? "border-red-200 bg-red-50" : "border-emerald-200 bg-emerald-50"
             }`}
           >
-            <p
-              className={`text-sm ${
-                remainingAmount > 0 ? "text-red-700" : "text-emerald-700"
-              }`}
-            >
-              คงเหลือ
-            </p>
+            <p className={`text-sm ${remainingAmount > 0 ? "text-red-700" : "text-emerald-700"}`}>คงเหลือ</p>
 
-            <p
-              className={`mt-2 text-2xl font-bold ${
-                remainingAmount > 0 ? "text-red-700" : "text-emerald-700"
-              }`}
-            >
-              {formatMoney(Math.max(remainingAmount, 0))} บาท
+            <p className={`mt-2 text-2xl font-bold ${remainingAmount > 0 ? "text-red-700" : "text-emerald-700"}`}>
+              {formatMoney(remainingAmount)} บาท
             </p>
           </div>
         </div>
@@ -618,16 +424,12 @@ export default async function InvoiceDetailPage({
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
           <div className="flex flex-col justify-between gap-3 border-b border-slate-200 px-6 py-4 md:flex-row md:items-center">
             <div>
-              <h2 className="text-lg font-bold text-slate-800">
-                ประวัติการรับชำระเงิน
-              </h2>
+              <h2 className="text-lg font-bold text-slate-800">ประวัติการรับชำระเงิน</h2>
 
-              <p className="mt-1 text-sm text-slate-500">
-                รับชำระแล้ว {invoice.payments.length} รายการ
-              </p>
+              <p className="mt-1 text-sm text-slate-500">รับชำระแล้ว {invoice.payments.length} รายการ</p>
             </div>
 
-            {remainingAmount > 0 && (
+            {canReceivePayment && (
               <Link
                 href={`/payments/new?invoiceId=${invoice.id}`}
                 className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
@@ -639,11 +441,9 @@ export default async function InvoiceDetailPage({
 
           {invoice.payments.length === 0 ? (
             <div className="px-6 py-12 text-center">
-              <p className="text-slate-500">
-                Invoice นี้ยังไม่มีประวัติการรับชำระเงิน
-              </p>
+              <p className="text-slate-500">Invoice นี้ยังไม่มีประวัติการรับชำระเงิน</p>
 
-              {remainingAmount > 0 && (
+              {canReceivePayment && (
                 <Link
                   href={`/payments/new?invoiceId=${invoice.id}`}
                   className="mt-4 inline-block text-sm font-semibold text-emerald-600 hover:underline"
@@ -651,85 +451,51 @@ export default async function InvoiceDetailPage({
                   บันทึกการรับชำระเงิน
                 </Link>
               )}
+
+              {invoice.status === "DRAFT" && (
+                <p className="mt-2 text-sm text-slate-400">ต้องออก Invoice ก่อนจึงจะรับชำระเงินได้</p>
+              )}
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
                 <thead className="bg-slate-50">
                   <tr className="border-b border-slate-200">
-                    <th className="px-4 py-3 text-center font-semibold text-slate-700">
-                      #
-                    </th>
-
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      วันที่รับเงิน
-                    </th>
-
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      วิธีชำระเงิน
-                    </th>
-
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      เลขที่อ้างอิง
-                    </th>
-
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      ผู้รับเงิน
-                    </th>
-
-                    <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                      จำนวนเงิน
-                    </th>
-
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      หมายเหตุ
-                    </th>
+                    <th className="px-4 py-3 text-center font-semibold text-slate-700">#</th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">วันที่รับเงิน</th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">วิธีชำระเงิน</th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">เลขที่อ้างอิง</th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">ผู้รับเงิน</th>
+                    <th className="px-4 py-3 text-right font-semibold text-slate-700">จำนวนเงิน</th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">หมายเหตุ</th>
                   </tr>
                 </thead>
 
                 <tbody>
                   {invoice.payments.map((payment, index) => (
-                    <tr
-                      key={payment.id}
-                      className="border-b border-slate-100 hover:bg-slate-50"
-                    >
-                      <td className="px-4 py-3 text-center text-slate-500">
-                        {index + 1}
-                      </td>
+                    <tr key={payment.id} className="border-b border-slate-100 hover:bg-slate-50">
+                      <td className="px-4 py-3 text-center text-slate-500">{index + 1}</td>
 
-                      <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                        {formatDate(payment.paymentDate)}
-                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatDate(payment.paymentDate)}</td>
 
-                      <td className="px-4 py-3 text-slate-700">
-                        {getPaymentMethodLabel(payment.paymentMethod)}
-                      </td>
+                      <td className="px-4 py-3 text-slate-700">{paymentMethodLabel(payment.paymentMethod)}</td>
 
-                      <td className="px-4 py-3 text-slate-700">
-                        {payment.referenceNumber || "-"}
-                      </td>
+                      <td className="px-4 py-3 text-slate-700">{payment.referenceNumber || "-"}</td>
 
-                      <td className="px-4 py-3 text-slate-700">
-                        {payment.receivedBy || "-"}
-                      </td>
+                      <td className="px-4 py-3 text-slate-700">{payment.receivedBy || "-"}</td>
 
                       <td className="whitespace-nowrap px-4 py-3 text-right font-semibold text-emerald-600">
-                        {formatMoney(Number(payment.amount))} บาท
+                        {formatMoney(payment.amount)} บาท
                       </td>
 
-                      <td className="px-4 py-3 text-slate-600">
-                        {payment.note || "-"}
-                      </td>
+                      <td className="px-4 py-3 text-slate-600">{payment.note || "-"}</td>
                     </tr>
                   ))}
                 </tbody>
 
                 <tfoot className="bg-slate-50">
                   <tr>
-                    <td
-                      colSpan={5}
-                      className="px-4 py-4 text-right font-bold text-slate-700"
-                    >
+                    <td colSpan={5} className="px-4 py-4 text-right font-bold text-slate-700">
                       รวมรับชำระ
                     </td>
 

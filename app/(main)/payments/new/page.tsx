@@ -1,31 +1,25 @@
-import { getServerSession } from "next-auth";
-import { redirect, notFound } from "next/navigation";
-import authOptions from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { notFound } from "next/navigation";
+
 import PaymentForm from "@/components/payments/PaymentForm";
+import { requirePageSession } from "@/lib/auth";
+import { paymentSummary, round2 } from "@/lib/money";
+import { paymentBlockedReason } from "@/lib/payments";
+import { prisma } from "@/lib/prisma";
 
 export const instant = false;
 
 type PageProps = {
   searchParams: Promise<{
-    invoiceId?: string;
+    invoiceId?: string | string[];
   }>;
 };
 
-export default async function NewPaymentPage({
-  searchParams,
-}: PageProps) {
-  const session = await getServerSession(authOptions);
+export default async function NewPaymentPage({ searchParams }: PageProps) {
+  const session = await requirePageSession();
 
-  if (!session) {
-    redirect("/login");
-  }
+  const { invoiceId } = await searchParams;
 
-  const params = await searchParams;
-
-  const invoiceId = params.invoiceId;
-
-  if (!invoiceId) {
+  if (typeof invoiceId !== "string" || invoiceId === "") {
     notFound();
   }
 
@@ -33,8 +27,13 @@ export default async function NewPaymentPage({
     where: {
       id: invoiceId,
     },
-    include: {
-      payments: true,
+    select: {
+      id: true,
+      invoiceNumber: true,
+      customerNameSnapshot: true,
+      status: true,
+      grandTotal: true,
+      payments: { select: { amount: true } },
     },
   });
 
@@ -42,14 +41,11 @@ export default async function NewPaymentPage({
     notFound();
   }
 
-  const totalPaid = invoice.payments.reduce(
-    (sum, payment) => sum + Number(payment.amount),
-    0
+  // Exact satang math: the prefilled amount always equals what the API will accept.
+  const summary = paymentSummary(
+    invoice.grandTotal,
+    invoice.payments.map((payment) => payment.amount)
   );
-
-  const grandTotal = Number(invoice.grandTotal);
-
-  const remainingAmount = grandTotal - totalPaid;
 
   return (
     <main className="min-h-screen bg-slate-100 p-6">
@@ -70,12 +66,13 @@ export default async function NewPaymentPage({
           invoice={{
             id: invoice.id,
             invoiceNumber: invoice.invoiceNumber,
-            invoiceDate: invoice.invoiceDate.toISOString(),
-            grandTotal,
-            totalPaid,
-            remainingAmount,
             customerName: invoice.customerNameSnapshot,
+            grandTotal: round2(invoice.grandTotal),
+            totalPaid: summary.paid,
+            remainingAmount: summary.remaining,
           }}
+          blockedReason={paymentBlockedReason(invoice.status)}
+          currentUserName={session.user.name ?? session.user.username ?? ""}
         />
       </div>
     </main>

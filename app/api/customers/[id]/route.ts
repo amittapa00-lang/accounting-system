@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
+
+import { ApiError, handleApiError, readJson } from "@/lib/api";
+import { requireApiSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+
+import { CUSTOMER_CODE_CONFLICT, parseCustomerInput } from "../input";
 
 type RouteContext = {
   params: Promise<{
@@ -7,98 +12,45 @@ type RouteContext = {
   }>;
 };
 
-export async function GET(
-  request: Request,
-  context: RouteContext
-) {
+export async function GET(_request: Request, context: RouteContext) {
   try {
+    await requireApiSession();
+
     const { id } = await context.params;
 
     const customer = await prisma.customer.findUnique({
-      where: {
-        id,
-      },
+      where: { id },
     });
 
     if (!customer) {
-      return NextResponse.json(
-        { error: "ไม่พบข้อมูลลูกค้า" },
-        { status: 404 }
-      );
+      throw new ApiError(404, "ไม่พบข้อมูลลูกค้า");
     }
 
     return NextResponse.json(customer);
   } catch (error) {
-    console.error("GET CUSTOMER ERROR:", error);
-
-    return NextResponse.json(
-      { error: "เกิดข้อผิดพลาดในการดึงข้อมูลลูกค้า" },
-      { status: 500 }
-    );
+    return handleApiError(error, "เกิดข้อผิดพลาดในการดึงข้อมูลลูกค้า");
   }
 }
 
-export async function PUT(
-  request: Request,
-  context: RouteContext
-) {
+export async function PUT(request: Request, context: RouteContext) {
   try {
+    await requireApiSession();
+
     const { id } = await context.params;
-    const body = await request.json();
+    const body = await readJson(request);
+    const data = parseCustomerInput(body);
 
-    const {
-      code,
-      name,
-      address,
-      tel,
-      taxId,
-      branchType,
-      branchNumber,
-      contactName,
-      email,
-      note,
-      isActive,
-    } = body;
-
-    if (!code || !name) {
-      return NextResponse.json(
-        { error: "กรุณากรอกรหัสลูกค้าและชื่อลูกค้า" },
-        { status: 400 }
-      );
+    // isActive not sent: keep the current value (do not silently deactivate)
+    if (body.isActive !== undefined && typeof body.isActive !== "boolean") {
+      throw new ApiError(400, "สถานะลูกค้าไม่ถูกต้อง");
     }
 
-    const existingCustomer = await prisma.customer.findFirst({
-      where: {
-        code,
-        NOT: {
-          id,
-        },
-      },
-    });
-
-    if (existingCustomer) {
-      return NextResponse.json(
-        { error: "รหัสลูกค้านี้มีอยู่แล้ว" },
-        { status: 409 }
-      );
-    }
-
+    // Unknown id is P2025 -> 404; duplicate code is P2002 -> 409
     const customer = await prisma.customer.update({
-      where: {
-        id,
-      },
+      where: { id },
       data: {
-        code,
-        name,
-        address: address || null,
-        tel: tel || null,
-        taxId: taxId || null,
-        branchType: branchType || null,
-        branchNumber: branchNumber || null,
-        contactName: contactName || null,
-        email: email || null,
-        note: note || null,
-        isActive: Boolean(isActive),
+        ...data,
+        ...(typeof body.isActive === "boolean" ? { isActive: body.isActive } : {}),
       },
     });
 
@@ -107,11 +59,9 @@ export async function PUT(
       customer,
     });
   } catch (error) {
-    console.error("UPDATE CUSTOMER ERROR:", error);
-
-    return NextResponse.json(
-      { error: "เกิดข้อผิดพลาดในการแก้ไขข้อมูลลูกค้า" },
-      { status: 500 }
-    );
+    return handleApiError(error, "เกิดข้อผิดพลาดในการแก้ไขข้อมูลลูกค้า", {
+      conflict: CUSTOMER_CODE_CONFLICT,
+      notFound: "ไม่พบข้อมูลลูกค้า",
+    });
   }
 }

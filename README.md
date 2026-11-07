@@ -1,36 +1,73 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Accounting System
 
-## Getting Started
+ระบบจัดการบัญชีและลูกหนี้: ลูกค้า → Purchase Order → Invoice → รับชำระเงิน
 
-First, run the development server:
+Next.js 16 (App Router) · React 19 · Prisma 7 + PostgreSQL · next-auth (Credentials) · Tailwind CSS 4 · ExcelJS
+
+## เริ่มใช้งาน (เครื่อง dev)
+
+ต้องมี Node.js 24 และ PostgreSQL (หรือ Docker)
 
 ```bash
+# 1) ฐานข้อมูล (ถ้ายังไม่มี PostgreSQL) — รันบน port 5433
+docker run -d --name accounting-db --restart unless-stopped \
+  -e POSTGRES_USER=accounting -e POSTGRES_PASSWORD=<รหัสผ่าน> -e POSTGRES_DB=accounting \
+  -p 127.0.0.1:5433:5432 -v accounting-db-data:/var/lib/postgresql/data postgres:17-alpine
+
+# 2) ตั้งค่า
+cp .env.example .env          # แล้วแก้ DATABASE_URL และ NEXTAUTH_SECRET
+
+# 3) ติดตั้งและสร้างตาราง
+npm install
+npm run db:migrate
+
+# 4) สร้างผู้ใช้ admin (รหัสผ่านอย่างน้อย 8 ตัวอักษร)
+npm run create-admin -- admin <รหัสผ่าน>
+
+# 5) เปิดแอป → http://localhost:3000
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## คำสั่ง
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| คำสั่ง | ใช้ทำอะไร |
+|---|---|
+| `npm run dev` | เปิด dev server |
+| `npm run build` / `npm start` | build และรันแบบ production |
+| `npm run lint` / `npm run typecheck` | ตรวจโค้ด |
+| `npm run db:migrate` | อัปเดตตารางในฐานข้อมูลตาม migration |
+| `npm run db:migrate:dev` | สร้าง migration ใหม่หลังแก้ `prisma/schema.prisma` |
+| `npm run db:studio` | เปิดดู/แก้ข้อมูลผ่าน Prisma Studio |
+| `npm run create-admin -- <user> <pass>` | สร้าง admin หรือรีเซ็ตรหัสผ่าน admin |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## โครงสร้างโปรเจกต์
 
-## Learn More
+```
+app/
+  (main)/            หน้าที่ต้องล็อกอิน ใช้ layout เดียวกัน (เมนูด้านบน + ออกจากระบบ)
+    dashboard/  customers/  purchase-orders/  invoices/  payments/
+  api/               API (ทุก route ตรวจการล็อกอินด้วย requireApiSession)
+  login/             หน้าเข้าสู่ระบบ
+components/
+  layout/            เมนูนำทาง ปุ่มออกจากระบบ
+  customers/  purchase-orders/  invoices/  payments/   ฟอร์มและตารางของแต่ละส่วน
+lib/
+  auth.ts            ตั้งค่า next-auth + requirePageSession / requireApiSession
+  prisma.ts          Prisma client
+  api.ts             ApiError, readJson, handleApiError (รูปแบบ error ของ API)
+  money.ts           คำนวณเงินทั้งหมด (ปัดเป็นสตางค์, ส่วนลด, VAT, ยอดคงเหลือ)
+  format.ts          แสดงผลเงิน/วันที่ (เวลาไทย Asia/Bangkok)
+  labels.ts          สถานะ ประเภทเอกสาร วิธีชำระเงิน + ป้ายภาษาไทย
+  bahtText.ts        จำนวนเงินเป็นคำอ่านภาษาไทย (แบบ BAHTTEXT)
+prisma/              schema และ migrations
+scripts/             create-admin
+templates/           แบบฟอร์ม Excel ของ Invoice (ไม่อยู่ใน public/ จึงดาวน์โหลดตรงไม่ได้)
+types/               type เพิ่มเติมของ next-auth
+```
 
-To learn more about Next.js, take a look at the following resources:
+## กติกาที่ควรรู้
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **เงิน**: ทุกยอดเก็บเป็นทศนิยม 2 ตำแหน่ง คำนวณผ่าน `lib/money.ts` เท่านั้น (อย่าบวกลบเงินด้วย float ตรง ๆ)
+- **PO → Invoice**: PO หนึ่งใบออก Invoice ได้หนึ่งใบ (ถ้าจะออกใหม่ต้องยกเลิก Invoice ฉบับร่างเดิมก่อน)
+- **การชำระเงิน**: รับเงินได้เฉพาะ Invoice ที่ออกแล้ว และรับเกินยอดคงเหลือไม่ได้
+- **วันที่**: แสดงผลและวันที่ตั้งต้นใช้เวลาประเทศไทยเสมอ

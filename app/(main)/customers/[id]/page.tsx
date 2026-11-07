@@ -1,11 +1,10 @@
-import { getServerSession } from "next-auth";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import Link from "next/link";
 
-import authOptions from "@/lib/auth";
+import { requirePageSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
-import CustomerEditForm from "@/components/customers/CustomerEditForm";
+import CustomerForm from "@/components/customers/CustomerForm";
 
 export const instant = false;
 
@@ -15,44 +14,41 @@ type PageProps = {
   }>;
 };
 
-export default async function CustomerDetailPage({
-  params,
-}: PageProps) {
-  // ตรวจสอบการเข้าสู่ระบบ
-  const session = await getServerSession(authOptions);
+export default async function CustomerDetailPage({ params }: PageProps) {
+  await requirePageSession();
 
-  if (!session) {
-    redirect("/login");
-  }
-
-  // รับ ID จาก URL
   const { id } = await params;
 
-  // ค้นหาข้อมูลลูกค้าจากฐานข้อมูล
   const customer = await prisma.customer.findUnique({
-    where: {
-      id,
+    where: { id },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      address: true,
+      tel: true,
+      taxId: true,
+      branchType: true,
+      branchNumber: true,
+      contactName: true,
+      email: true,
+      note: true,
+      isActive: true,
     },
   });
 
-  // หากไม่พบข้อมูลลูกค้า ให้แสดงหน้า 404
   if (!customer) {
     notFound();
   }
 
   return (
-    <main className="min-h-screen bg-gray-100">
-      {/* Header */}
+    <main>
       <header className="border-b bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">
-              แก้ไขข้อมูลลูกค้า
-            </h1>
+            <h1 className="text-2xl font-bold text-gray-900">แก้ไขข้อมูลลูกค้า</h1>
 
-            <p className="text-sm text-gray-500">
-              Customer Master
-            </p>
+            <p className="text-sm text-gray-500">Customer Master</p>
           </div>
 
           <Link
@@ -64,9 +60,8 @@ export default async function CustomerDetailPage({
         </div>
       </header>
 
-      {/* Main */}
       <div className="mx-auto max-w-4xl px-6 py-8">
-        <CustomerEditForm customer={customer} />
+        <CustomerForm customer={customer} />
       </div>
     </main>
   );

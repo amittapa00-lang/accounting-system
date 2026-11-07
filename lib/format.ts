@@ -80,13 +80,30 @@ export function todayInputValue(): string {
 }
 
 /**
- * Parses a "YYYY-MM-DD" value from <input type="date"> (or an ISO string).
- * Returns null when empty, throws nothing; callers decide whether null is allowed.
+ * Parses a "YYYY-MM-DD" value from <input type="date"> (or a full ISO date-time string).
+ * Returns null when empty or invalid, including impossible dates such as 2026-02-31
+ * (which `new Date` would silently roll over to 3 March). Callers decide whether null is allowed.
+ * A plain date becomes UTC midnight, the same as `new Date("YYYY-MM-DD")`.
  */
 export function parseDateInput(value: unknown): Date | null {
-  if (typeof value !== "string" || value.trim() === "") return null;
-  const date = new Date(value.trim());
-  return Number.isNaN(date.getTime()) ? null : date;
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+
+  const ymd = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (ymd) {
+    const [year, month, day] = [Number(ymd[1]), Number(ymd[2]), Number(ymd[3])];
+    const date = new Date(Date.UTC(year, month - 1, day));
+    const sameDay =
+      date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+    return sameDay ? date : null;
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}T/.test(text)) {
+    const date = new Date(text);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  return null;
 }
 
 /** Year and month of a date in Thai time, e.g. { year: 2026, month: "11" }. */

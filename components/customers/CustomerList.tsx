@@ -102,7 +102,7 @@ export default function CustomerList({
             )}
           </div>
         ) : (
-          <table className="w-full min-w-850px border-collapse">
+          <table className="w-full min-w-[850px] border-collapse">
             <thead>
               <tr className="border-b bg-gray-50 text-left">
                 <th className="px-4 py-3 text-sm font-semibold text-gray-700">

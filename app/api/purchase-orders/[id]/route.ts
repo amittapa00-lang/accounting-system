@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
+
+import { ApiError, handleApiError, readJson } from "@/lib/api";
+import { requireApiSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { ACTIVE_INVOICE_WHERE, cleanPoItems, getPoLock, samePoItems } from "@/lib/purchase-orders";
+
+import { parsePurchaseOrderHeader, parsePurchaseOrderStatus, PO_NUMBER_CONFLICT } from "../input";
 
 type RouteContext = {
   params: Promise<{
@@ -7,75 +13,19 @@ type RouteContext = {
   }>;
 };
 
-function parseDiscount(
-  discountInput: string | number | null | undefined,
-  baseAmount: number
-) {
-  const rawValue = String(discountInput ?? "")
-    .trim()
-    .replace(/,/g, "");
-
-  if (!rawValue) {
-    return {
-      value: 0,
-      type: "PERCENT",
-      amount: 0,
-    };
-  }
-
-  const isPercent = rawValue.endsWith("%");
-
-  const numericText = isPercent
-    ? rawValue.slice(0, -1).trim()
-    : rawValue;
-
-  const numericValue = Number(numericText);
-
-  if (!Number.isFinite(numericValue) || numericValue < 0) {
-    throw new Error("Discount ไม่ถูกต้อง");
-  }
-
-  if (isPercent) {
-    if (numericValue > 100) {
-      throw new Error("Discount % ต้องไม่เกิน 100%");
-    }
-
-    return {
-      value: numericValue,
-      type: "PERCENT",
-      amount: baseAmount * (numericValue / 100),
-    };
-  }
-
-  if (numericValue > baseAmount) {
-    throw new Error("Discount แบบจำนวนเงินต้องไม่เกินยอดสินค้า");
-  }
-
-  return {
-    value: numericValue,
-    type: "AMOUNT",
-    amount: numericValue,
-  };
-}
-
 // GET: ดูรายละเอียด PO
-export async function GET(
-  request: Request,
-  context: RouteContext
-) {
+export async function GET(_request: Request, context: RouteContext) {
   try {
+    await requireApiSession();
+
     const { id } = await context.params;
 
     const purchaseOrder = await prisma.purchaseOrder.findUnique({
-      where: {
-        id,
-      },
+      where: { id },
       include: {
         customer: true,
         items: {
-          orderBy: {
-            itemNo: "asc",
-          },
+          orderBy: { itemNo: "asc" },
         },
         invoices: {
           select: {
@@ -86,282 +36,128 @@ export async function GET(
             grandTotal: true,
             status: true,
           },
-          orderBy: {
-            invoiceDate: "desc",
-          },
+          orderBy: { invoiceDate: "desc" },
         },
       },
     });
 
     if (!purchaseOrder) {
-      return NextResponse.json(
-        {
-          error: "ไม่พบข้อมูล PO",
-        },
-        {
-          status: 404,
-        }
-      );
+      throw new ApiError(404, "ไม่พบข้อมูล PO");
     }
 
-    return NextResponse.json({
-      purchaseOrder,
-    });
+    return NextResponse.json({ purchaseOrder });
   } catch (error) {
-    console.error("GET PURCHASE ORDER ERROR:", error);
-
-    return NextResponse.json(
-      {
-        error: "เกิดข้อผิดพลาดในการดึงข้อมูล PO",
-      },
-      {
-        status: 500,
-      }
-    );
+    return handleApiError(error, "เกิดข้อผิดพลาดในการดึงข้อมูล PO");
   }
 }
 
 // PUT: แก้ไข PO
-export async function PUT(
-  request: Request,
-  context: RouteContext
-) {
+// - "items" not sent: lines stay as they are
+// - PO has an invoice that is not cancelled: customer, PO No. and lines cannot change
+// - PO is cancelled: lines cannot change
+export async function PUT(request: Request, context: RouteContext) {
   try {
+    await requireApiSession();
+
     const { id } = await context.params;
 
-    const body = await request.json();
+    const body = await readJson(request);
+    const header = parsePurchaseOrderHeader(body);
+    const status = parsePurchaseOrderStatus(body.status);
+    const items = body.items === undefined ? null : cleanPoItems(body.items);
 
-    const {
-      poNumber,
-      customerId,
-      plant,
-      poDate,
-      deliveryDate,
-      deliveryPlace,
-      billPlacement,
-      paymentTerm,
-      quotationNumber,
-      quotationDate,
-      contactName,
-      contactPhone,
-      contactMobile,
-      acceptanceCondition,
-      note,
-      status,
-      items,
-    } = body;
+    const purchaseOrder = await prisma.$transaction(async (tx) => {
+      // Lock the PO row: invoice creation locks the same row, so "has an invoice"
+      // cannot change between the check below and the write.
+      const locked = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id FROM "PurchaseOrder" WHERE id = ${id} FOR UPDATE
+      `;
 
-    if (!poNumber || !customerId || !poDate) {
-      return NextResponse.json(
-        {
-          error: "กรุณากรอก PO No., ลูกค้า และวันที่ PO",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
-
-    if (!Array.isArray(items) || items.length === 0) {
-      return NextResponse.json(
-        {
-          error: "กรุณาเพิ่มรายการสินค้าอย่างน้อย 1 รายการ",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
-
-    const existingPO = await prisma.purchaseOrder.findUnique({
-      where: {
-        id,
-      },
-      include: {
-        items: true,
-      },
-    });
-
-    if (!existingPO) {
-      return NextResponse.json(
-        {
-          error: "ไม่พบข้อมูล PO ที่ต้องการแก้ไข",
-        },
-        {
-          status: 404,
-        }
-      );
-    }
-
-    const duplicatePO = await prisma.purchaseOrder.findFirst({
-      where: {
-        poNumber,
-        NOT: {
-          id,
-        },
-      },
-    });
-
-    if (duplicatePO) {
-      return NextResponse.json(
-        {
-          error: "เลขที่ PO นี้มีอยู่ในระบบแล้ว กรุณาใช้เลขที่ PO อื่น",
-        },
-        {
-          status: 409,
-        }
-      );
-    }
-
-    const customer = await prisma.customer.findUnique({
-      where: {
-        id: customerId,
-      },
-    });
-
-    if (!customer) {
-      return NextResponse.json(
-        {
-          error: "ไม่พบข้อมูลลูกค้าที่เลือก",
-        },
-        {
-          status: 404,
-        }
-      );
-    }
-
-    const cleanedItems = items.map(
-      (
-        item: {
-          description: string;
-          quantity: number | string;
-          unit?: string;
-          unitPrice: number | string;
-          discount?: string | number;
-          discountType?: string;
-          vat?: number | string;
-        },
-        index: number
-      ) => {
-        const quantity = Number(item.quantity);
-        const unitPrice = Number(item.unitPrice);
-        const vat = Number(item.vat || 0);
-
-        if (!item.description?.trim()) {
-          throw new Error(
-            `กรุณากรอกรายละเอียดสินค้า รายการที่ ${index + 1}`
-          );
-        }
-
-        if (!Number.isFinite(quantity) || quantity <= 0) {
-          throw new Error(
-            `จำนวนสินค้าไม่ถูกต้อง รายการที่ ${index + 1}`
-          );
-        }
-
-        if (!Number.isFinite(unitPrice) || unitPrice < 0) {
-          throw new Error(
-            `ราคาสินค้าไม่ถูกต้อง รายการที่ ${index + 1}`
-          );
-        }
-
-        if (!Number.isFinite(vat) || vat < 0) {
-          throw new Error(
-            `VAT ไม่ถูกต้อง รายการที่ ${index + 1}`
-          );
-        }
-
-        const beforeDiscount = quantity * unitPrice;
-
-        const discount = parseDiscount(
-          item.discount,
-          beforeDiscount
-        );
-
-        const netAmount = beforeDiscount - discount.amount;
-
-        return {
-          itemNo: index + 1,
-          description: item.description.trim(),
-          quantity,
-          unit: item.unit?.trim() || null,
-          unitPrice,
-          discount: discount.value,
-          discountType: discount.type,
-          vat,
-          amount: netAmount,
-        };
+      if (locked.length === 0) {
+        throw new ApiError(404, "ไม่พบข้อมูล PO ที่ต้องการแก้ไข");
       }
-    );
 
-    const updatedPurchaseOrder =
-      await prisma.$transaction(async (tx) => {
-        await tx.purchaseOrderItem.deleteMany({
-          where: {
-            purchaseOrderId: id,
+      const existing = await tx.purchaseOrder.findUniqueOrThrow({
+        where: { id },
+        include: {
+          items: {
+            orderBy: { itemNo: "asc" },
           },
-        });
-
-        return tx.purchaseOrder.update({
-          where: {
-            id,
-          },
-          data: {
-            poNumber,
-            customerId,
-            plant: plant || null,
-            poDate: new Date(poDate),
-            deliveryDate: deliveryDate
-              ? new Date(deliveryDate)
-              : null,
-            deliveryPlace: deliveryPlace || null,
-            billPlacement: billPlacement || null,
-            paymentTerm: paymentTerm || null,
-            quotationNumber: quotationNumber || null,
-            quotationDate: quotationDate
-              ? new Date(quotationDate)
-              : null,
-            contactName: contactName || null,
-            contactPhone: contactPhone || null,
-            contactMobile: contactMobile || null,
-            acceptanceCondition:
-              acceptanceCondition || null,
-            note: note || null,
-            status: status || existingPO.status,
-            items: {
-              create: cleanedItems,
-            },
-          },
-          include: {
-            customer: true,
-            items: {
-              orderBy: {
-                itemNo: "asc",
-              },
-            },
-          },
-        });
+        },
       });
+
+      const hasActiveInvoice =
+        (await tx.invoice.count({
+          where: { purchaseOrderId: id, ...ACTIVE_INVOICE_WHERE },
+        })) > 0;
+
+      const lock = getPoLock(existing.status, hasActiveInvoice);
+
+      // Compare trimmed: a PO No. saved with stray spaces before trimming existed is not a change
+      const poNumberChanged = existing.poNumber.trim() !== header.poNumber;
+      const customerChanged = existing.customerId !== header.customerId;
+      const itemsChanged = items !== null && !samePoItems(existing.items, items);
+
+      if (lock && (itemsChanged || (lock.identityLocked && (poNumberChanged || customerChanged)))) {
+        throw new ApiError(409, lock.message);
+      }
+
+      const nextStatus = status ?? existing.status;
+
+      if (nextStatus === "CANCELLED" && existing.status !== "CANCELLED" && hasActiveInvoice) {
+        throw new ApiError(409, "ไม่สามารถยกเลิก PO ที่มี Invoice อยู่ได้ กรุณายกเลิก Invoice ก่อน");
+      }
+
+      if (customerChanged) {
+        const customer = await tx.customer.findUnique({
+          where: { id: header.customerId },
+          select: { isActive: true },
+        });
+
+        if (!customer) {
+          throw new ApiError(400, "ไม่พบข้อมูลลูกค้าที่เลือก");
+        }
+
+        // The current customer may be inactive (the PO stays editable), but a PO cannot be moved to one
+        if (!customer.isActive) {
+          throw new ApiError(400, "ลูกค้าที่เลือกถูกปิดใช้งานแล้ว");
+        }
+      }
+
+      if (itemsChanged && items) {
+        await tx.purchaseOrderItem.deleteMany({
+          where: { purchaseOrderId: id },
+        });
+      }
+
+      const { poNumber, ...headerFields } = header;
+
+      return tx.purchaseOrder.update({
+        where: { id },
+        data: {
+          ...headerFields,
+          ...(poNumberChanged ? { poNumber } : {}),
+          status: nextStatus,
+          ...(itemsChanged && items ? { items: { create: items } } : {}),
+        },
+        include: {
+          customer: true,
+          items: {
+            orderBy: { itemNo: "asc" },
+          },
+        },
+      });
+    });
 
     return NextResponse.json({
       message: "แก้ไข PO สำเร็จ",
-      purchaseOrder: updatedPurchaseOrder,
+      purchaseOrder,
     });
   } catch (error) {
-    console.error("UPDATE PURCHASE ORDER ERROR:", error);
-
-    const message =
-      error instanceof Error
-        ? error.message
-        : "เกิดข้อผิดพลาดในการแก้ไข PO";
-
-    return NextResponse.json(
-      {
-        error: message,
-      },
-      {
-        status: 500,
-      }
-    );
+    return handleApiError(error, "เกิดข้อผิดพลาดในการแก้ไข PO", {
+      conflict: PO_NUMBER_CONFLICT,
+      notFound: "ไม่พบข้อมูล PO ที่ต้องการแก้ไข",
+      inUse: "ไม่พบข้อมูลลูกค้าที่เลือก",
+    });
   }
 }

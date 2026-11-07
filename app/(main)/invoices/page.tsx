@@ -1,17 +1,16 @@
 import Link from "next/link";
-import { getServerSession } from "next-auth";
-import { redirect } from "next/navigation";
-import authOptions from "@/lib/auth";
+
+import { requirePageSession } from "@/lib/auth";
+import { formatDate, formatMoney } from "@/lib/format";
+import { isBilledInvoiceStatus } from "@/lib/invoices";
+import { documentTypeLabel, invoiceStatusClass, invoiceStatusLabel } from "@/lib/labels";
+import { sumMoney } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 
 export const instant = false;
 
 export default async function InvoicesPage() {
-  const session = await getServerSession(authOptions);
-
-  if (!session) {
-    redirect("/login");
-  }
+  await requirePageSession();
 
   const invoices = await prisma.invoice.findMany({
     orderBy: {
@@ -24,287 +23,143 @@ export default async function InvoicesPage() {
           poNumber: true,
         },
       },
-      items: {
-        select: {
-          id: true,
-          amount: true,
-        },
+      _count: {
+        select: { items: true },
       },
     },
   });
 
-  const formattedInvoices = invoices.map((invoice) => ({
-    id: invoice.id,
-    invoiceNumber: invoice.invoiceNumber,
-    documentType: invoice.documentType,
-    invoiceDate: invoice.invoiceDate.toISOString(),
-    customerName: invoice.customerNameSnapshot,
-    purchaseOrderId: invoice.purchaseOrder.id,
-    purchaseOrderNumber: invoice.purchaseOrder.poNumber,
-    subtotal: Number(invoice.subtotal),
-    vat: Number(invoice.vat),
-    grandTotal: Number(invoice.grandTotal),
-    status: invoice.status,
-    itemCount: invoice.items.length,
-  }));
+  // Only invoices that were actually billed (not drafts, not cancelled)
+  const billedTotal = sumMoney(
+    invoices.filter((invoice) => isBilledInvoiceStatus(invoice.status)).map((invoice) => invoice.grandTotal)
+  );
 
-  const formatDate = (date: string) => {
-    return new Intl.DateTimeFormat("th-TH", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(new Date(date));
-  };
-
-  const formatMoney = (amount: number) => {
-    return amount.toLocaleString("th-TH", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
-  };
-
-  const getDocumentTypeName = (type: string) => {
-    switch (type) {
-      case "TAX_INVOICE_DELIVERY":
-        return "ใบกำกับภาษี / ใบส่งของ / ใบแจ้งหนี้";
-
-      case "BILLING_INVOICE":
-        return "ใบวางบิล / ใบแจ้งหนี้";
-
-      case "RECEIPT":
-        return "ใบเสร็จรับเงิน";
-
-      default:
-        return type;
-    }
-  };
-
-  const getStatusName = (status: string) => {
-    switch (status) {
-      case "DRAFT":
-        return "ฉบับร่าง";
-
-      case "ISSUED":
-        return "ออกเอกสารแล้ว";
-
-      case "PAID":
-        return "ชำระแล้ว";
-
-      case "CANCELLED":
-        return "ยกเลิก";
-
-      default:
-        return status;
-    }
-  };
+  const draftCount = invoices.filter((invoice) => invoice.status === "DRAFT").length;
 
   return (
     <main className="min-h-screen bg-slate-100 p-6">
       <div className="mx-auto max-w-7xl">
         {/* Header */}
-        <div className="mb-6 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">
-              Invoice
-            </h1>
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold text-slate-800">Invoice</h1>
 
-            <p className="mt-1 text-sm text-slate-500">
-              รายการใบแจ้งหนี้และเอกสารการขาย
-            </p>
-          </div>
-
-          <Link
-            href="/dashboard"
-            className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-             ← กลับ Dashboard
-          </Link>
+          <p className="mt-1 text-sm text-slate-500">รายการใบแจ้งหนี้และเอกสารการขาย</p>
         </div>
 
         {/* Summary */}
         <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
           <div className="rounded-xl bg-white p-5 shadow-sm">
-            <p className="text-sm text-slate-500">
-              จำนวน Invoice
-            </p>
+            <p className="text-sm text-slate-500">จำนวน Invoice</p>
 
-            <p className="mt-2 text-2xl font-bold text-slate-800">
-              {formattedInvoices.length.toLocaleString("th-TH")}
-            </p>
+            <p className="mt-2 text-2xl font-bold text-slate-800">{invoices.length.toLocaleString("en-US")}</p>
           </div>
 
           <div className="rounded-xl bg-white p-5 shadow-sm">
-            <p className="text-sm text-slate-500">
-              ยอดรวมทั้งหมด
-            </p>
+            <p className="text-sm text-slate-500">ยอดรวม Invoice ที่ออกแล้ว</p>
 
-            <p className="mt-2 text-2xl font-bold text-slate-800">
-              {formatMoney(
-                formattedInvoices.reduce(
-                  (sum, invoice) =>
-                    sum + invoice.grandTotal,
-                  0
-                )
-              )}
-            </p>
+            <p className="mt-2 text-2xl font-bold text-slate-800">{formatMoney(billedTotal)}</p>
           </div>
 
           <div className="rounded-xl bg-white p-5 shadow-sm">
-            <p className="text-sm text-slate-500">
-              Invoice ฉบับร่าง
-            </p>
+            <p className="text-sm text-slate-500">Invoice ฉบับร่าง</p>
 
-            <p className="mt-2 text-2xl font-bold text-amber-600">
-              {
-                formattedInvoices.filter(
-                  (invoice) =>
-                    invoice.status === "DRAFT"
-                ).length
-              }
-            </p>
+            <p className="mt-2 text-2xl font-bold text-amber-600">{draftCount}</p>
           </div>
         </div>
 
         {/* Table */}
         <div className="overflow-hidden rounded-xl bg-white shadow-sm">
           <div className="overflow-x-auto">
-            <table className="min-w-1100px w-full">
+            <table className="w-full min-w-[1100px]">
               <thead className="bg-slate-800 text-white">
                 <tr>
-                  <th className="px-4 py-3 text-left text-sm font-semibold">
-                    Invoice No.
-                  </th>
-
-                  <th className="px-4 py-3 text-left text-sm font-semibold">
-                    วันที่
-                  </th>
-
-                  <th className="px-4 py-3 text-left text-sm font-semibold">
-                    Customer
-                  </th>
-
-                  <th className="px-4 py-3 text-left text-sm font-semibold">
-                    PO No.
-                  </th>
-
-                  <th className="px-4 py-3 text-left text-sm font-semibold">
-                    ประเภทเอกสาร
-                  </th>
-
-                  <th className="px-4 py-3 text-right text-sm font-semibold">
-                    จำนวนเงิน
-                  </th>
-
-                  <th className="px-4 py-3 text-center text-sm font-semibold">
-                    สถานะ
-                  </th>
-
-                  <th className="px-4 py-3 text-center text-sm font-semibold">
-                    จัดการ
-                  </th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold">Invoice No.</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold">วันที่</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold">Customer</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold">PO No.</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold">ประเภทเอกสาร</th>
+                  <th className="px-4 py-3 text-right text-sm font-semibold">จำนวนเงิน</th>
+                  <th className="px-4 py-3 text-center text-sm font-semibold">สถานะ</th>
+                  <th className="px-4 py-3 text-center text-sm font-semibold">จัดการ</th>
                 </tr>
               </thead>
 
               <tbody className="divide-y divide-slate-200">
-                {formattedInvoices.length === 0 ? (
+                {invoices.length === 0 ? (
                   <tr>
-                    <td
-                      colSpan={8}
-                      className="px-4 py-12 text-center text-sm text-slate-500"
-                    >
+                    <td colSpan={8} className="px-4 py-12 text-center text-sm text-slate-500">
                       ยังไม่มี Invoice
                     </td>
                   </tr>
                 ) : (
-                  formattedInvoices.map((invoice) => (
-                    <tr
-                      key={invoice.id}
-                      className="hover:bg-slate-50"
-                    >
-                      <td className="px-4 py-4">
-                        <div className="font-semibold text-slate-800">
-                          {invoice.invoiceNumber}
-                        </div>
+                  invoices.map((invoice) => {
+                    const itemCount = invoice._count.items;
+                    const isCancelled = invoice.status === "CANCELLED";
 
-                        <div className="text-xs text-slate-400">
-                          {invoice.itemCount} รายการ
-                        </div>
-                      </td>
+                    return (
+                      <tr key={invoice.id} className="hover:bg-slate-50">
+                        <td className="px-4 py-4">
+                          <div className="font-semibold text-slate-800">{invoice.invoiceNumber}</div>
 
-                      <td className="px-4 py-4 text-sm text-slate-600">
-                        {formatDate(invoice.invoiceDate)}
-                      </td>
+                          <div className="text-xs text-slate-400">{itemCount} รายการ</div>
+                        </td>
 
-                      <td className="px-4 py-4">
-                        <div className="font-medium text-slate-800">
-                          {invoice.customerName}
-                        </div>
-                      </td>
+                        <td className="px-4 py-4 text-sm text-slate-600">{formatDate(invoice.invoiceDate)}</td>
 
-                      <td className="px-4 py-4">
-                        <Link
-                          href={`/purchase-orders/${invoice.purchaseOrderId}`}
-                          className="text-sm font-medium text-blue-600 hover:underline"
-                        >
-                          {invoice.purchaseOrderNumber}
-                        </Link>
-                      </td>
+                        <td className="px-4 py-4">
+                          <div className="font-medium text-slate-800">{invoice.customerNameSnapshot}</div>
+                        </td>
 
-                      <td className="px-4 py-4 text-sm text-slate-600">
-                        {getDocumentTypeName(
-                          invoice.documentType
-                        )}
-                      </td>
+                        <td className="px-4 py-4">
+                          <Link
+                            href={`/purchase-orders/${invoice.purchaseOrder.id}`}
+                            className="text-sm font-medium text-blue-600 hover:underline"
+                          >
+                            {invoice.purchaseOrder.poNumber}
+                          </Link>
+                        </td>
 
-                      <td className="px-4 py-4 text-right">
-                        <span className="font-semibold text-slate-800">
-                          {formatMoney(invoice.grandTotal)}
-                        </span>
+                        <td className="px-4 py-4 text-sm text-slate-600">{documentTypeLabel(invoice.documentType)}</td>
 
-                        <div className="text-xs text-slate-400">
-                          VAT{" "}
-                          {formatMoney(invoice.vat)}
-                        </div>
-                      </td>
+                        <td className="px-4 py-4 text-right">
+                          <span className="font-semibold text-slate-800">{formatMoney(invoice.grandTotal)}</span>
 
-                      <td className="px-4 py-4 text-center">
-                        <span
-                          className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
-                            invoice.status === "DRAFT"
-                              ? "bg-amber-100 text-amber-700"
-                              : invoice.status === "PAID"
-                                ? "bg-emerald-100 text-emerald-700"
-                                : invoice.status ===
-                                    "CANCELLED"
-                                  ? "bg-red-100 text-red-700"
-                                  : "bg-blue-100 text-blue-700"
-                          }`}
-                        >
-                          {getStatusName(
-                            invoice.status
-                          )}
-                        </span>
-                      </td>
+                          <div className="text-xs text-slate-400">VAT {formatMoney(invoice.vat)}</div>
+                        </td>
 
-                      <td className="px-4 py-4 text-center">
-                        <Link
-                          href={`/invoices/${invoice.id}`}
-                          className="inline-flex rounded-lg bg-slate-800 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700"
-                        >
-                          ดูรายละเอียด
-                        </Link>
+                        <td className="px-4 py-4 text-center">
+                          <span
+                            className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${invoiceStatusClass(
+                              invoice.status
+                            )}`}
+                          >
+                            {invoiceStatusLabel(invoice.status)}
+                          </span>
+                        </td>
 
-                         <a
-      href={`/api/invoices/${invoice.id}/excel`}
-      className="inline-flex whitespace-nowrap rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-    >
-      ↓ ดาวน์โหลด Excel
-    </a>
+                        <td className="px-4 py-4 text-center">
+                          <div className="flex flex-wrap justify-center gap-2">
+                            <Link
+                              href={`/invoices/${invoice.id}`}
+                              className="inline-flex rounded-lg bg-slate-800 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700"
+                            >
+                              ดูรายละเอียด
+                            </Link>
 
-
-                      </td>
-                    </tr>
-                  ))
+                            {/* Invoice ที่ยกเลิกแล้วดาวน์โหลดไม่ได้ (route ตอบ 409) */}
+                            {!isCancelled && (
+                              <a
+                                href={`/api/invoices/${invoice.id}/excel`}
+                                className="inline-flex whitespace-nowrap rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+                              >
+                                ↓ ดาวน์โหลด Excel
+                              </a>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

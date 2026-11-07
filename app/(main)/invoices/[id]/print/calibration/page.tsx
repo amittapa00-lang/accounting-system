@@ -1,6 +1,8 @@
-import { getServerSession } from "next-auth";
-import { notFound, redirect } from "next/navigation";
-import authOptions from "@/lib/auth";
+import { notFound } from "next/navigation";
+
+import { requirePageSession } from "@/lib/auth";
+import { formatDate, formatMoney } from "@/lib/format";
+import { formatLineDiscount, formatQuantity } from "@/lib/invoices";
 import { prisma } from "@/lib/prisma";
 
 export const instant = false;
@@ -11,31 +13,14 @@ type PageProps = {
   }>;
 };
 
-function formatMoney(value: unknown) {
-  return Number(value).toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
-function formatDate(value: Date | string | null | undefined) {
-  if (!value) return "";
-
-  return new Date(value).toLocaleDateString("th-TH", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
-}
-
+/**
+ * Calibration view for the 9 x 5.5 inch continuous form: shows the system's data (red) over a
+ * scan of the printed form so positions can be adjusted. Not linked from the UI.
+ */
 export default async function CalibrationPage({
   params,
 }: PageProps) {
-  const session = await getServerSession(authOptions);
-
-  if (!session) {
-    redirect("/login");
-  }
+  await requirePageSession();
 
   const { id } = await params;
 
@@ -44,7 +29,7 @@ export default async function CalibrationPage({
       id,
     },
     include: {
-      purchaseOrder: true,
+      purchaseOrder: { select: { poNumber: true } },
       items: {
         orderBy: {
           itemNo: "asc",
@@ -335,7 +320,7 @@ export default async function CalibrationPage({
         </div>
 
         <div>
-          9 × 11 inch
+          9 × 5.5 inch
         </div>
       </div>
 
@@ -390,7 +375,7 @@ export default async function CalibrationPage({
               top: "calc(12mm + var(--offset-y))",
             }}
           >
-            {formatDate(invoice.invoiceDate)}
+            {formatDate(invoice.invoiceDate, "")}
           </div>
 
           {/* =========================================
@@ -462,7 +447,7 @@ export default async function CalibrationPage({
               top: "calc(33mm + var(--offset-y))",
             }}
           >
-            {formatDate(invoice.dueDate)}
+            {formatDate(invoice.dueDate, "")}
           </div>
 
           {/* =========================================
@@ -581,7 +566,7 @@ export default async function CalibrationPage({
                     width: "15.3mm",
                   }}
                 >
-                  {Number(item.quantity).toLocaleString("en-US")}
+                  {formatQuantity(item.quantity)}
                 </div>
 
                 {/* UNIT PRICE */}
@@ -607,11 +592,7 @@ export default async function CalibrationPage({
                     width: "25.2mm",
                   }}
                 >
-                  {Number(item.discount) > 0
-                    ? `${Number(
-                        item.discount
-                      ).toLocaleString("en-US")}%`
-                    : ""}
+                  {formatLineDiscount(item.discount, item.discountType)}
                 </div>
 
                 {/* AMOUNT */}
@@ -633,33 +614,34 @@ export default async function CalibrationPage({
 
           {/* =========================================
               SUB TOTAL
+              (ตำแหน่ง top ของช่องนี้ยังไม่ได้วัดจากฟอร์มจริง ให้ปรับตอน calibrate)
           ========================================= */}
 
           <div
-  className="data right"
-  style={{
-    left: "calc(196.2mm + var(--offset-x))",
-    top: "calc(127.5mm + var(--offset-y))",
-    width: "27mm",
-  }}
->
-  {formatMoney(invoice.vat)}
-</div>
+            className="data right"
+            style={{
+              left: "calc(196.2mm + var(--offset-x))",
+              top: "calc(123mm + var(--offset-y))",
+              width: "27mm",
+            }}
+          >
+            {formatMoney(invoice.subtotal)}
+          </div>
 
           {/* =========================================
               VAT
           ========================================= */}
 
-         <div
-  className="data right"
-  style={{
-    left: "calc(196.2mm + var(--offset-x))",
-    top: "calc(132mm + var(--offset-y))",
-    width: "27mm",
-  }}
->
-  {formatMoney(invoice.grandTotal)}
-</div>
+          <div
+            className="data right"
+            style={{
+              left: "calc(196.2mm + var(--offset-x))",
+              top: "calc(127.5mm + var(--offset-y))",
+              width: "27mm",
+            }}
+          >
+            {formatMoney(invoice.vat)}
+          </div>
 
           {/* =========================================
               GRAND TOTAL

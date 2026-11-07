@@ -1,8 +1,11 @@
-import { getServerSession } from "next-auth";
-import { notFound, redirect } from "next/navigation";
+import Link from "next/link";
+import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
 
-import authOptions from "@/lib/auth";
+import { requirePageSession } from "@/lib/auth";
+import { bahtText } from "@/lib/bahtText";
+import { formatDate, formatMoney } from "@/lib/format";
+import { formatLineDiscount, formatQuantity } from "@/lib/invoices";
 import { prisma } from "@/lib/prisma";
 
 import PrintButton from "@/components/invoices/PrintButton";
@@ -13,15 +16,16 @@ type PageProps = {
   params: Promise<{
     id: string;
   }>;
+  searchParams: Promise<{
+    debug?: string;
+  }>;
 };
 
 /* =========================================================
-   DEBUG
-   true  = พิมพ์เส้นกริดทุก 1 ซม. (เส้นแดง) และ 5 มม. (เส้นฟ้า)
-   false = ปิดกริด (ใช้ตอนพิมพ์จริง)
+   DEBUG GRID
+   เปิดด้วย ?debug=1 ต่อท้าย URL
+   = พิมพ์เส้นกริดทุก 1 ซม. (เส้นแดง) และ 5 มม. (เส้นฟ้า) ไว้ปรับตำแหน่ง
 ========================================================= */
-
-const DEBUG = true;
 
 /* =========================================================
    OFFSET ปรับทั้งใบ (mm)
@@ -66,6 +70,12 @@ const POS = {
 const ITEM_START_TOP = 99;
 const ITEM_ROW_HEIGHT = 7;
 
+/** แถวรายการที่ลงได้ต่อหน้า ก่อนถึงช่องยอดรวม (99 + 18 x 7 = 225 < 230) */
+const ROWS_PER_PAGE = Math.floor((POS.subtotal.top - ITEM_START_TOP) / ITEM_ROW_HEIGHT);
+
+/** รายละเอียด 1 แถว (7 มม.) แสดงได้ 2 บรรทัด */
+const DESCRIPTION_LINES_PER_ROW = 2;
+
 const COL = {
   itemNo: { left: 15, width: 10 },
   description: { left: 20, width: 77 },
@@ -74,127 +84,6 @@ const COL = {
   discount: { left: 143.5, width: 29 },
   amount: { left: 173, width: 27 },
 };
-
-
-/* =========================================================
-   FORMAT
-========================================================= */
-
-function formatMoney(value: unknown) {
-  return Number(value).toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
-function formatDate(value: Date | string | null | undefined) {
-  if (!value) {
-    return "";
-  }
-
-  return new Date(value).toLocaleDateString("th-TH", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
-}
-
-/* =========================================================
-   แปลงตัวเลขเป็นข้อความภาษาไทย
-========================================================= */
-
-function numberToThaiText(number: number): string {
-  if (!Number.isFinite(number)) {
-    return "";
-  }
-
-  const rounded = Math.round(number * 100) / 100;
-  const baht = Math.floor(rounded);
-  const satang = Math.round((rounded - baht) * 100);
-
-  function convertNumber(num: number): string {
-    if (num === 0) {
-      return "";
-    }
-
-    let result = "";
-
-    if (num >= 1_000_000) {
-      const millionPart = Math.floor(num / 1_000_000);
-      result += convertNumber(millionPart);
-      result += "ล้าน";
-      num %= 1_000_000;
-    }
-
-    const digits = [
-      { value: Math.floor(num / 100_000), unit: "แสน" },
-      { value: Math.floor((num % 100_000) / 10_000), unit: "หมื่น" },
-      { value: Math.floor((num % 10_000) / 1_000), unit: "พัน" },
-      { value: Math.floor((num % 1_000) / 100), unit: "ร้อย" },
-      { value: Math.floor((num % 100) / 10), unit: "สิบ" },
-      { value: num % 10, unit: "" },
-    ];
-
-    const numbers = [
-      "",
-      "หนึ่ง",
-      "สอง",
-      "สาม",
-      "สี่",
-      "ห้า",
-      "หก",
-      "เจ็ด",
-      "แปด",
-      "เก้า",
-    ];
-
-    for (const digit of digits) {
-      if (digit.value === 0) {
-        continue;
-      }
-
-      if (digit.unit === "สิบ") {
-        if (digit.value === 1) {
-          result += "สิบ";
-        } else if (digit.value === 2) {
-          result += "ยี่สิบ";
-        } else {
-          result += numbers[digit.value] + "สิบ";
-        }
-        continue;
-      }
-
-      if (digit.unit === "") {
-        if (digit.value === 1 && num >= 10) {
-          result += "เอ็ด";
-        } else {
-          result += numbers[digit.value];
-        }
-        continue;
-      }
-
-      result += numbers[digit.value] + digit.unit;
-    }
-
-    return result;
-  }
-
-  let result = "";
-
-  if (baht === 0) {
-    result = "ศูนย์บาท";
-  } else {
-    result = convertNumber(baht) + "บาท";
-  }
-
-  if (satang === 0) {
-    result += "ถ้วน";
-  } else {
-    result += convertNumber(satang) + "สตางค์";
-  }
-
-  return result;
-}
 
 /* =========================================================
    POSITION HELPER
@@ -217,27 +106,48 @@ function pos(p: Box, extra: CSSProperties = {}): CSSProperties {
 }
 
 /* =========================================================
+   แบ่งหน้า: รายการที่ยาวเกินพื้นที่ขึ้นหน้าใหม่ ยอดรวมพิมพ์ที่หน้าสุดท้าย
+========================================================= */
+
+type PlacedItem<T> = { item: T; row: number; rows: number };
+
+function paginate<T extends { description: string }>(items: T[]): PlacedItem<T>[][] {
+  const pages: PlacedItem<T>[][] = [[]];
+  let row = 0;
+
+  for (const item of items) {
+    const lineCount = item.description.split(/\r?\n/).length;
+    const rows = Math.min(Math.max(1, Math.ceil(lineCount / DESCRIPTION_LINES_PER_ROW)), ROWS_PER_PAGE);
+
+    if (row + rows > ROWS_PER_PAGE) {
+      pages.push([]);
+      row = 0;
+    }
+
+    pages[pages.length - 1].push({ item, row, rows });
+    row += rows;
+  }
+
+  return pages;
+}
+
+/* =========================================================
    PAGE
 ========================================================= */
 
-export default async function InvoicePrintPage({ params }: PageProps) {
-  const session = await getServerSession(authOptions);
-
-  if (!session) {
-    redirect("/login");
-  }
+export default async function InvoicePrintPage({ params, searchParams }: PageProps) {
+  await requirePageSession();
 
   const { id } = await params;
+  const { debug } = await searchParams;
+  const showGrid = debug === "1";
 
   const invoice = await prisma.invoice.findUnique({
     where: { id },
     include: {
-      purchaseOrder: true,
+      purchaseOrder: { select: { poNumber: true } },
       items: {
         orderBy: { itemNo: "asc" },
-      },
-      payments: {
-        orderBy: { paymentDate: "asc" },
       },
     },
   });
@@ -246,7 +156,27 @@ export default async function InvoicePrintPage({ params }: PageProps) {
     notFound();
   }
 
-  const amountInWords = numberToThaiText(Number(invoice.grandTotal));
+  if (invoice.status === "CANCELLED") {
+    return (
+      <main className="p-6">
+        <div className="mx-auto max-w-xl rounded-xl bg-white p-8 text-center shadow-sm">
+          <h1 className="text-xl font-bold text-slate-800">Invoice {invoice.invoiceNumber} ถูกยกเลิกแล้ว</h1>
+
+          <p className="mt-2 text-sm text-slate-500">ไม่สามารถพิมพ์ Invoice ที่ถูกยกเลิกได้</p>
+
+          <Link
+            href={`/invoices/${invoice.id}`}
+            className="mt-6 inline-flex rounded-lg bg-slate-800 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+          >
+            กลับไปหน้า Invoice
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
+  const pages = paginate(invoice.items);
+  const amountInWords = bahtText(invoice.grandTotal);
 
   return (
     <>
@@ -256,42 +186,36 @@ export default async function InvoicePrintPage({ params }: PageProps) {
           margin: 0;
         }
 
-        *,
-        *::before,
-        *::after {
+        .print-root,
+        .print-root *,
+        .print-root *::before,
+        .print-root *::after {
           box-sizing: border-box;
         }
 
-        html {
-          margin: 0;
-          padding: 0;
-          width: 210mm;
-          min-width: 210mm;
-          height: 297mm;
-          min-height: 297mm;
-        }
-
-        body {
-          margin: 0;
-          padding: 0;
-          width: 210mm;
-          min-width: 210mm;
-          height: 297mm;
-          min-height: 297mm;
+        .print-root {
           background: #e5e7eb;
+          padding-bottom: 20px;
           font-family: Arial, Tahoma, sans-serif;
-          overflow-x: hidden;
         }
 
         .print-toolbar {
           width: 210mm;
           min-height: 60px;
+          margin: 0 auto;
           padding: 12px;
           background: white;
           border-bottom: 1px solid #d1d5db;
           display: flex;
+          flex-direction: column;
           align-items: center;
           justify-content: center;
+          gap: 8px;
+        }
+
+        .print-notice {
+          font-size: 13px;
+          color: #b45309;
         }
 
         .print-page {
@@ -300,7 +224,7 @@ export default async function InvoicePrintPage({ params }: PageProps) {
           height: 297mm;
           min-width: 210mm;
           min-height: 297mm;
-          margin: 20px auto;
+          margin: 20px auto 0;
           padding: 0;
           background: white;
           overflow: hidden;
@@ -355,31 +279,18 @@ export default async function InvoicePrintPage({ params }: PageProps) {
         }
 
         @media print {
-          @page {
-            size: A4 portrait;
-            margin: 0;
-          }
-
-          html {
-            width: 210mm !important;
-            min-width: 210mm !important;
-            height: 297mm !important;
-            min-height: 297mm !important;
-            margin: 0 !important;
-            padding: 0 !important;
-          }
-
+          html,
           body {
-            width: 210mm !important;
-            min-width: 210mm !important;
-            height: 297mm !important;
-            min-height: 297mm !important;
             margin: 0 !important;
             padding: 0 !important;
             background: white !important;
-            overflow: hidden !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
+          }
+
+          .print-root {
+            background: white !important;
+            padding: 0 !important;
           }
 
           .print-toolbar {
@@ -387,272 +298,297 @@ export default async function InvoicePrintPage({ params }: PageProps) {
           }
 
           .print-page {
-            width: 210mm !important;
-            height: 297mm !important;
-            min-width: 210mm !important;
-            min-height: 297mm !important;
             margin: 0 !important;
-            padding: 0 !important;
-            background: white !important;
-            overflow: hidden !important;
-            page-break-after: always;
-            page-break-inside: avoid;
             break-after: page;
+            break-inside: avoid;
+          }
+
+          .print-page:last-child {
+            break-after: auto;
           }
         }
       `}</style>
 
-      <div className="print-toolbar">
-        <PrintButton />
-      </div>
+      <div className="print-root">
+        <div className="print-toolbar">
+          <PrintButton />
 
-      <div className="print-page">
-        {/* ===== DEBUG GRID ===== */}
+          {invoice.status === "DRAFT" && (
+            <p className="print-notice">Invoice นี้ยังเป็นฉบับร่าง (ยังไม่ได้กดออก Invoice)</p>
+          )}
 
-        {DEBUG && (
-          <>
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                pointerEvents: "none",
-                backgroundImage: `
-                  linear-gradient(to right, rgba(255,0,0,.55) 0.2mm, transparent 0.2mm),
-                  linear-gradient(to bottom, rgba(255,0,0,.55) 0.2mm, transparent 0.2mm),
-                  linear-gradient(to right, rgba(0,0,255,.18) 0.1mm, transparent 0.1mm),
-                  linear-gradient(to bottom, rgba(0,0,255,.18) 0.1mm, transparent 0.1mm)
-                `,
-                backgroundSize: "10mm 10mm, 10mm 10mm, 5mm 5mm, 5mm 5mm",
-              }}
-            />
+          {pages.length > 1 && (
+            <p className="print-notice">
+              มีสินค้า {invoice.items.length} รายการ เกินพื้นที่ 1 หน้า จะพิมพ์ทั้งหมด {pages.length} หน้า
+              (ยอดรวมอยู่หน้าสุดท้าย)
+            </p>
+          )}
+        </div>
 
-            {Array.from({ length: 21 }, (_, i) => (
-              <div
-                key={`x${i}`}
-                style={{
-                  position: "absolute",
-                  left: `${i * 10 + 0.5}mm`,
-                  top: "0.5mm",
-                  fontSize: "6pt",
-                  color: "red",
-                }}
-              >
-                {i * 10}
+        <div>
+          {pages.map((pageItems, pageIndex) => {
+            const isLastPage = pageIndex === pages.length - 1;
+
+            return (
+              <div className="print-page" key={pageIndex}>
+                {/* ===== DEBUG GRID (?debug=1) ===== */}
+
+                {showGrid && (
+                  <>
+                    <div
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        pointerEvents: "none",
+                        backgroundImage: `
+                          linear-gradient(to right, rgba(255,0,0,.55) 0.2mm, transparent 0.2mm),
+                          linear-gradient(to bottom, rgba(255,0,0,.55) 0.2mm, transparent 0.2mm),
+                          linear-gradient(to right, rgba(0,0,255,.18) 0.1mm, transparent 0.1mm),
+                          linear-gradient(to bottom, rgba(0,0,255,.18) 0.1mm, transparent 0.1mm)
+                        `,
+                        backgroundSize: "10mm 10mm, 10mm 10mm, 5mm 5mm, 5mm 5mm",
+                      }}
+                    />
+
+                    {Array.from({ length: 21 }, (_, i) => (
+                      <div
+                        key={`x${i}`}
+                        style={{
+                          position: "absolute",
+                          left: `${i * 10 + 0.5}mm`,
+                          top: "0.5mm",
+                          fontSize: "6pt",
+                          color: "red",
+                        }}
+                      >
+                        {i * 10}
+                      </div>
+                    ))}
+
+                    {Array.from({ length: 30 }, (_, i) => (
+                      <div
+                        key={`y${i}`}
+                        style={{
+                          position: "absolute",
+                          top: `${i * 10 + 0.5}mm`,
+                          left: "0.5mm",
+                          fontSize: "6pt",
+                          color: "red",
+                        }}
+                      >
+                        {i * 10}
+                      </div>
+                    ))}
+                  </>
+                )}
+
+                {/* ===== INVOICE NUMBER ===== */}
+
+                <div className="field" style={pos(POS.invoiceNumber, { fontSize: "9pt" })}>
+                  {invoice.invoiceNumber}
+                </div>
+
+                {/* ===== INVOICE DATE ===== */}
+
+                <div className="field" style={pos(POS.invoiceDate, { fontSize: "9pt" })}>
+                  {formatDate(invoice.invoiceDate, "")}
+                </div>
+
+                {/* ===== CUSTOMER CODE ===== */}
+
+                <div className="field" style={pos(POS.customerCode, { fontSize: "9pt" })}>
+                  {invoice.customerCodeSnapshot ?? ""}
+                </div>
+
+                {/* ===== CUSTOMER NAME ===== */}
+
+                <div className="field" style={pos(POS.customerName, { fontSize: "9pt" })}>
+                  {invoice.customerNameSnapshot}
+                </div>
+
+                {/* ===== CUSTOMER ADDRESS ===== */}
+
+                <div
+                  className="field wrap"
+                  style={pos(POS.customerAddress, {
+                    height: "11mm",
+                    lineHeight: "1.25",
+                    whiteSpace: "normal",
+                    fontSize: "8pt",
+                  })}
+                >
+                  {invoice.customerAddressSnapshot ?? ""}
+                </div>
+
+                {/* ===== SHIP TO ===== */}
+
+                <div
+                  className="field wrap"
+                  style={pos(POS.shipTo, {
+                    height: "8mm",
+                    lineHeight: "1.05",
+                    fontSize: "7pt",
+                    whiteSpace: "normal",
+                    overflow: "visible",
+                  })}
+                >
+                  {invoice.shipToSnapshot ?? ""}
+                </div>
+
+                {/* ===== SALE ORDER ===== */}
+
+                <div className="table-field" style={pos(POS.saleOrder, { fontSize: "8.5pt" })}>
+                  {invoice.saleOrderNumber ?? ""}
+                </div>
+
+                {/* ===== PURCHASE ORDER ===== */}
+
+                <div className="table-field" style={pos(POS.poNumber, { fontSize: "8.5pt" })}>
+                  {invoice.purchaseOrder.poNumber}
+                </div>
+
+                {/* ===== SALE NAME ===== */}
+
+                <div className="table-field" style={pos(POS.saleName, { fontSize: "8.5pt" })}>
+                  {invoice.saleName ?? ""}
+                </div>
+
+                {/* ===== ENTRY BY ===== */}
+
+                <div className="table-field" style={pos(POS.entryBy, { fontSize: "8.5pt" })}>
+                  {invoice.entryBy ?? ""}
+                </div>
+
+                {/* ===== ITEMS ===== */}
+
+                {pageItems.map(({ item, row, rows }) => {
+                  const top = ITEM_START_TOP + row * ITEM_ROW_HEIGHT;
+                  const firstRowHeight = `${ITEM_ROW_HEIGHT - 0.5}mm`;
+                  const descriptionHeight = `${rows * ITEM_ROW_HEIGHT - 0.5}mm`;
+
+                  return (
+                    <div key={item.id}>
+                      <div
+                        className="item"
+                        style={pos(
+                          { ...COL.itemNo, top },
+                          { textAlign: "left", height: firstRowHeight, whiteSpace: "nowrap" }
+                        )}
+                      >
+                        {item.itemNo}
+                      </div>
+
+                      <div
+                        className="item"
+                        style={pos(
+                          { ...COL.description, top },
+                          { height: descriptionHeight, whiteSpace: "pre-line", lineHeight: "1.15" }
+                        )}
+                      >
+                        {item.description}
+                      </div>
+
+                      <div
+                        className="item"
+                        style={pos(
+                          { ...COL.quantity, top },
+                          { textAlign: "left", height: firstRowHeight, whiteSpace: "nowrap" }
+                        )}
+                      >
+                        {formatQuantity(item.quantity)}
+                      </div>
+
+                      <div
+                        className="item"
+                        style={pos(
+                          { ...COL.unitPrice, top },
+                          { textAlign: "left", height: firstRowHeight, whiteSpace: "nowrap" }
+                        )}
+                      >
+                        {formatMoney(item.unitPrice)}
+                      </div>
+
+                      <div
+                        className="item"
+                        style={pos(
+                          { ...COL.discount, top },
+                          { textAlign: "left", height: firstRowHeight, whiteSpace: "nowrap" }
+                        )}
+                      >
+                        {formatLineDiscount(item.discount, item.discountType)}
+                      </div>
+
+                      <div
+                        className="item"
+                        style={pos(
+                          { ...COL.amount, top },
+                          { textAlign: "right", height: firstRowHeight, whiteSpace: "nowrap" }
+                        )}
+                      >
+                        {formatMoney(item.amount)}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {isLastPage ? (
+                  <>
+                    {/* ===== AMOUNT IN WORDS ===== */}
+
+                    <div
+                      className="amount-in-words"
+                      style={pos(POS.amountInWords, {
+                        height: "6mm",
+                        lineHeight: "6mm",
+                        padding: 0,
+                        margin: 0,
+                        whiteSpace: "nowrap",
+                        fontSize: "8.5pt",
+                      })}
+                    >
+                      {amountInWords}
+                    </div>
+
+                    {/* ===== SUB TOTAL ===== */}
+
+                    <div className="field" style={pos(POS.subtotal, { fontSize: "9pt", textAlign: "right" })}>
+                      {formatMoney(invoice.subtotal)}
+                    </div>
+
+                    {/* ===== VAT ===== */}
+
+                    <div className="field" style={pos(POS.vat, { fontSize: "9pt", textAlign: "right" })}>
+                      {formatMoney(invoice.vat)}
+                    </div>
+
+                    {/* ===== GRAND TOTAL ===== */}
+
+                    <div
+                      className="field"
+                      style={pos(POS.grandTotal, {
+                        fontSize: "9pt",
+                        fontWeight: 500,
+                        textAlign: "right",
+                      })}
+                    >
+                      {formatMoney(invoice.grandTotal)}
+                    </div>
+                  </>
+                ) : (
+                  /* ===== CONTINUED (ใต้แถวสุดท้ายของตาราง ก่อนช่องยอดรวม) ===== */
+                  <div
+                    className="item"
+                    style={pos(
+                      { ...COL.description, top: ITEM_START_TOP + ROWS_PER_PAGE * ITEM_ROW_HEIGHT },
+                      { height: "4.5mm", whiteSpace: "nowrap" }
+                    )}
+                  >
+                    (มีต่อหน้าถัดไป หน้า {pageIndex + 1}/{pages.length})
+                  </div>
+                )}
               </div>
-            ))}
-
-            {Array.from({ length: 30 }, (_, i) => (
-              <div
-                key={`y${i}`}
-                style={{
-                  position: "absolute",
-                  top: `${i * 10 + 0.5}mm`,
-                  left: "0.5mm",
-                  fontSize: "6pt",
-                  color: "red",
-                }}
-              >
-                {i * 10}
-              </div>
-            ))}
-          </>
-        )}
-
-        {/* ===== INVOICE NUMBER ===== */}
-
-        <div className="field" style={pos(POS.invoiceNumber, { fontSize: "9pt" })}>
-          {invoice.invoiceNumber}
-        </div>
-
-        {/* ===== INVOICE DATE ===== */}
-
-        <div className="field" style={pos(POS.invoiceDate, { fontSize: "9pt" })}>
-          {formatDate(invoice.invoiceDate)}
-        </div>
-
-        {/* ===== CUSTOMER CODE ===== */}
-
-        <div className="field" style={pos(POS.customerCode, { fontSize: "9pt" })}>
-          {invoice.customerCodeSnapshot ?? ""}
-        </div>
-
-        {/* ===== CUSTOMER NAME ===== */}
-
-        <div className="field" style={pos(POS.customerName, { fontSize: "9pt" })}>
-          {invoice.customerNameSnapshot}
-        </div>
-
-        {/* ===== CUSTOMER ADDRESS ===== */}
-
-        <div
-          className="field wrap"
-          style={pos(POS.customerAddress, {
-            height: "11mm",
-            lineHeight: "1.25",
-            whiteSpace: "normal",
-            fontSize: "8pt",
+            );
           })}
-        >
-          {invoice.customerAddressSnapshot ?? ""}
-        </div>
-
-        {/* ===== SHIP TO ===== */}
-
-        <div
-          className="field wrap"
-          style={pos(POS.shipTo, {
-            height: "8mm",
-            lineHeight: "1.05",
-            fontSize: "7pt",
-            whiteSpace: "normal",
-            overflow: "visible",
-          })}
-        >
-          {invoice.shipToSnapshot ?? ""}
-        </div>
-
-        {/* ===== SALE ORDER ===== */}
-
-        <div className="table-field" style={pos(POS.saleOrder, { fontSize: "8.5pt" })}>
-          {invoice.saleOrderNumber ?? ""}
-        </div>
-
-        {/* ===== PURCHASE ORDER ===== */}
-
-        <div className="table-field" style={pos(POS.poNumber, { fontSize: "8.5pt" })}>
-          {invoice.purchaseOrder.poNumber}
-        </div>
-
-        {/* ===== SALE NAME ===== */}
-
-        <div className="table-field" style={pos(POS.saleName, { fontSize: "8.5pt" })}>
-          {invoice.saleName ?? ""}
-        </div>
-
-        {/* ===== ENTRY BY ===== */}
-
-        <div className="table-field" style={pos(POS.entryBy, { fontSize: "8.5pt" })}>
-          {invoice.entryBy ?? ""}
-        </div>
-
-        {/* ===== ITEMS ===== */}
-
-        {invoice.items.map((item, index) => {
-          const top = ITEM_START_TOP + index * ITEM_ROW_HEIGHT;
-          const rowHeight = `${ITEM_ROW_HEIGHT - 0.5}mm`;
-
-          return (
-            <div key={item.id}>
-              <div
-                className="item"
-                style={pos(
-                  { ...COL.itemNo, top },
-                  { textAlign: "left", height: rowHeight, whiteSpace: "nowrap" }
-                )}
-              >
-                {item.itemNo}
-              </div>
-
-              <div
-                className="item"
-                style={pos(
-                  { ...COL.description, top },
-                  { height: rowHeight, whiteSpace: "normal", lineHeight: "1.15" }
-                )}
-              >
-                {item.description}
-              </div>
-
-              <div
-                className="item"
-                style={pos(
-                  { ...COL.quantity, top },
-                  { textAlign: "left", height: rowHeight, whiteSpace: "nowrap" }
-                )}
-              >
-                {Number(item.quantity).toLocaleString("en-US")}
-              </div>
-
-              <div
-                className="item"
-                style={pos(
-                  { ...COL.unitPrice, top },
-                  { textAlign: "left", height: rowHeight, whiteSpace: "nowrap" }
-                )}
-              >
-                {formatMoney(item.unitPrice)}
-              </div>
-
-              <div
-                className="item"
-                style={pos(
-                  { ...COL.discount, top },
-                  { textAlign: "left", height: rowHeight, whiteSpace: "nowrap" }
-                )}
-              >
-                {item.discount
-                  ? `${Number(item.discount).toLocaleString("en-US")}%`
-                  : ""}
-              </div>
-
-              <div
-                className="item"
-                style={pos(
-                  { ...COL.amount, top },
-                  { textAlign: "right", height: rowHeight, whiteSpace: "nowrap" }
-                )}
-              >
-                {formatMoney(item.amount)}
-              </div>
-            </div>
-          );
-        })}
-
-        {/* ===== AMOUNT IN WORDS ===== */}
-
-        <div
-          className="amount-in-words"
-          style={pos(POS.amountInWords, {
-            height: "6mm",
-            lineHeight: "6mm",
-            padding: 0,
-            margin: 0,
-            whiteSpace: "nowrap",
-            fontSize: "8.5pt",
-          })}
-        >
-          {amountInWords}
-        </div>
-
-        {/* ===== SUB TOTAL ===== */}
-
-        <div
-          className="field"
-          style={pos(POS.subtotal, { fontSize: "9pt", textAlign: "right" })}
-        >
-          {formatMoney(invoice.subtotal)}
-        </div>
-
-        {/* ===== VAT ===== */}
-
-        <div
-          className="field"
-          style={pos(POS.vat, { fontSize: "9pt", textAlign: "right" })}
-        >
-          {formatMoney(invoice.vat)}
-        </div>
-
-        {/* ===== GRAND TOTAL ===== */}
-
-        <div
-          className="field"
-          style={pos(POS.grandTotal, {
-            fontSize: "9pt",
-            fontWeight: 500,
-            textAlign: "right",
-          })}
-        >
-          {formatMoney(invoice.grandTotal)}
         </div>
       </div>
     </>

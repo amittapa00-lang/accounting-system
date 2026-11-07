@@ -1,64 +1,22 @@
 import { NextResponse } from "next/server";
 
+import { handleApiError, readJson } from "@/lib/api";
+import { requireApiSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+
+import { CUSTOMER_CODE_CONFLICT, parseCustomerInput } from "./input";
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    await requireApiSession();
 
-    const {
-      code,
-      name,
-      address,
-      tel,
-      taxId,
-      branchType,
-      branchNumber,
-      contactName,
-      email,
-      note,
-    } = body;
+    const body = await readJson(request);
+    const data = parseCustomerInput(body);
 
-    if (!code || !name) {
-      return NextResponse.json(
-        {
-          error: "กรุณากรอกรหัสลูกค้าและชื่อลูกค้า",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
-
-    const existingCustomer = await prisma.customer.findUnique({
-      where: {
-        code,
-      },
-    });
-
-    if (existingCustomer) {
-      return NextResponse.json(
-        {
-          error: "รหัสลูกค้านี้มีอยู่แล้ว",
-        },
-        {
-          status: 409,
-        }
-      );
-    }
-
+    // code is @unique: a duplicate (including two saves at the same moment) is P2002 -> 409
     const customer = await prisma.customer.create({
       data: {
-        code,
-        name,
-        address: address || null,
-        tel: tel || null,
-        taxId: taxId || null,
-        branchType: branchType || null,
-        branchNumber: branchNumber || null,
-        contactName: contactName || null,
-        email: email || null,
-        note: note || null,
+        ...data,
         isActive: true,
       },
     });
@@ -68,20 +26,11 @@ export async function POST(request: Request) {
         message: "บันทึกลูกค้าสำเร็จ",
         customer,
       },
-      {
-        status: 201,
-      }
+      { status: 201 }
     );
   } catch (error) {
-    console.error("CREATE CUSTOMER ERROR:", error);
-
-    return NextResponse.json(
-      {
-        error: "เกิดข้อผิดพลาดในการบันทึกลูกค้า",
-      },
-      {
-        status: 500,
-      }
-    );
+    return handleApiError(error, "เกิดข้อผิดพลาดในการบันทึกลูกค้า", {
+      conflict: CUSTOMER_CODE_CONFLICT,
+    });
   }
 }

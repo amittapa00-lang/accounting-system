@@ -1,7 +1,5 @@
-import { getServerSession } from "next-auth";
-import { redirect } from "next/navigation";
-
-import authOptions from "@/lib/auth";
+import { requirePageSession } from "@/lib/auth";
+import { calcTotals } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 
 import PurchaseOrderList from "@/components/purchase-orders/PurchaseOrderList";
@@ -9,11 +7,7 @@ import PurchaseOrderList from "@/components/purchase-orders/PurchaseOrderList";
 export const instant = false;
 
 export default async function PurchaseOrdersPage() {
-  const session = await getServerSession(authOptions);
-
-  if (!session) {
-    redirect("/login");
-  }
+  await requirePageSession();
 
   const purchaseOrders = await prisma.purchaseOrder.findMany({
     orderBy: {
@@ -28,8 +22,8 @@ export default async function PurchaseOrdersPage() {
       },
       items: {
         select: {
-          id: true,
           amount: true,
+          vat: true,
         },
       },
     },
@@ -44,14 +38,13 @@ export default async function PurchaseOrdersPage() {
       code: po.customer.code,
       name: po.customer.name,
     },
-    items: po.items.map((item) => ({
-      id: item.id,
-      amount: Number(item.amount),
-    })),
+    itemCount: po.items.length,
+    // Same total as the PO detail page: subtotal + VAT
+    grandTotal: calcTotals(po.items).grandTotal,
   }));
 
   return (
-    <main className="min-h-screen bg-slate-100 p-6">
+    <main className="p-6">
       <div className="mx-auto max-w-7xl">
         <PurchaseOrderList purchaseOrders={formattedPurchaseOrders} />
       </div>

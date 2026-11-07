@@ -1,430 +1,138 @@
-import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
-import authOptions from "@/lib/auth";
+
+import { ApiError, handleApiError, optionalText, readJson, requiredText } from "@/lib/api";
+import { requireApiSession } from "@/lib/auth";
+import { isPaymentMethod } from "@/lib/labels";
+import { compareMoney, paymentSummary } from "@/lib/money";
+import {
+  exceedsRemainingMessage,
+  parsePaymentAmount,
+  parsePaymentDate,
+  paymentBlockedReason,
+  statusAfterPayment,
+} from "@/lib/payments";
 import { prisma } from "@/lib/prisma";
 
+/** Records a payment against one invoice and updates the invoice status (PARTIAL / PAID). */
 export async function POST(request: Request) {
   try {
+    const session = await requireApiSession();
+    const body = await readJson(request);
+
     // ==========================================
-    // ตรวจสอบ Login
+    // ตรวจสอบข้อมูล (ก่อนเปิด transaction)
     // ==========================================
 
-    const session = await getServerSession(authOptions);
+    const invoiceId = requiredText(body.invoiceId, "ไม่พบ Invoice ที่ต้องการรับชำระ");
 
-    if (!session) {
-      return NextResponse.json(
-        {
-          error: "กรุณาเข้าสู่ระบบก่อน",
-        },
-        {
-          status: 401,
-        }
-      );
+    // Format checks here; "not more than the remaining amount" is checked inside the transaction.
+    const parsedAmount = parsePaymentAmount(body.amount);
+    if ("error" in parsedAmount) {
+      throw new ApiError(400, parsedAmount.error);
+    }
+    const { amount } = parsedAmount;
+
+    if (!isPaymentMethod(body.paymentMethod)) {
+      throw new ApiError(400, "กรุณาเลือกวิธีชำระเงินให้ถูกต้อง");
+    }
+    const paymentMethod = body.paymentMethod;
+
+    const paymentDate = parsePaymentDate(body.paymentDate);
+    if ("error" in paymentDate) {
+      throw new ApiError(400, paymentDate.error);
     }
 
-    // ==========================================
-    // รับข้อมูล
-    // ==========================================
-
-    const body = await request.json();
-
-    const {
-      invoiceId,
-      paymentDate,
-      amount,
-      paymentMethod,
-      referenceNumber,
-      note,
-      receivedBy,
-    } = body;
-
-    // ==========================================
-    // ตรวจสอบ Invoice ID
-    // ==========================================
-
-    if (!invoiceId) {
-      return NextResponse.json(
-        {
-          error: "ไม่พบ Invoice",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
-
-    // ==========================================
-    // ตรวจสอบจำนวนเงิน
-    // ==========================================
-
-    const paymentAmount = Number(amount);
-
-    if (
-      amount === undefined ||
-      amount === null ||
-      amount === "" ||
-      Number.isNaN(paymentAmount)
-    ) {
-      return NextResponse.json(
-        {
-          error: "กรุณาระบุจำนวนเงิน",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
-
-    if (paymentAmount <= 0) {
-      return NextResponse.json(
-        {
-          error: "จำนวนเงินต้องมากกว่า 0",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
-
-    // ==========================================
-    // ตรวจสอบวิธีชำระเงิน
-    // ==========================================
-
-    if (!paymentMethod) {
-      return NextResponse.json(
-        {
-          error: "กรุณาระบุวิธีชำระเงิน",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
-
-    // ==========================================
-    // ตรวจสอบวันที่
-    // ==========================================
-
-    const paymentDateValue = paymentDate
-      ? new Date(paymentDate)
-      : new Date();
-
-    if (Number.isNaN(paymentDateValue.getTime())) {
-      return NextResponse.json(
-        {
-          error: "วันที่รับชำระเงินไม่ถูกต้อง",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
+    // Who received the money. Blank = the signed-in user.
+    const receivedBy =
+      optionalText(body.receivedBy) ?? session.user.name ?? session.user.username ?? null;
 
     // ==========================================
     // Transaction
     // ==========================================
 
-    const result = await prisma.$transaction(
-      async (tx) => {
-        // --------------------------------------
-        // หา Invoice
-        // --------------------------------------
+    const result = await prisma.$transaction(async (tx) => {
+      // Lock the invoice row first, so two payments for the same invoice run one
+      // after the other and the second one sees the first (no overpayment).
+      const locked = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id FROM "Invoice" WHERE id = ${invoiceId} FOR UPDATE
+      `;
 
-        const invoice =
-          await tx.invoice.findUnique({
-            where: {
-              id: invoiceId,
-            },
-            include: {
-              payments: true,
-            },
-          });
-
-        if (!invoice) {
-          throw new Error(
-            "INVOICE_NOT_FOUND"
-          );
-        }
-
-        // --------------------------------------
-        // Invoice ถูกยกเลิก
-        // --------------------------------------
-
-        if (invoice.status === "DRAFT") {
-  throw new Error(
-    "INVOICE_NOT_ISSUED"
-  );
-}
-
-if (invoice.status === "CANCELLED") {
-  throw new Error(
-    "INVOICE_CANCELLED"
-  );
-}
-
-if (invoice.status === "PAID") {
-  throw new Error(
-    "INVOICE_ALREADY_PAID"
-  );
-}
-
-        // --------------------------------------
-        // Invoice ชำระครบแล้ว
-        // --------------------------------------
-
-        if (invoice.status === "PAID") {
-          throw new Error(
-            "INVOICE_ALREADY_PAID"
-          );
-        }
-
-        // --------------------------------------
-        // คำนวณยอดชำระเดิม
-        // --------------------------------------
-
-        const totalPaid =
-          invoice.payments.reduce(
-            (sum, payment) =>
-              sum + Number(payment.amount),
-            0
-          );
-
-        // --------------------------------------
-        // ยอด Invoice
-        // --------------------------------------
-
-        const grandTotal = Number(
-          invoice.grandTotal
-        );
-
-        // --------------------------------------
-        // ยอดคงเหลือ
-        // --------------------------------------
-
-        const remainingAmount =
-          grandTotal - totalPaid;
-
-        // --------------------------------------
-        // ป้องกันยอดติดลบ
-        // --------------------------------------
-
-        if (remainingAmount <= 0) {
-          throw new Error(
-            "INVOICE_ALREADY_PAID"
-          );
-        }
-
-        // --------------------------------------
-        // ป้องกันรับเงินเกิน
-        // --------------------------------------
-
-        if (
-          paymentAmount >
-          remainingAmount
-        ) {
-          throw new Error(
-            "PAYMENT_EXCEEDS_REMAINING"
-          );
-        }
-
-        // --------------------------------------
-        // สร้าง Payment
-        // --------------------------------------
-
-        const payment =
-          await tx.payment.create({
-            data: {
-              paymentDate:
-                paymentDateValue,
-
-              amount: paymentAmount,
-
-              paymentMethod,
-
-              referenceNumber:
-                referenceNumber || null,
-
-              note: note || null,
-
-              receivedBy:
-                receivedBy || null,
-
-              invoiceId: invoice.id,
-            },
-          });
-
-        // --------------------------------------
-        // คำนวณยอดใหม่
-        // --------------------------------------
-
-        const newTotalPaid =
-          totalPaid + paymentAmount;
-
-        const newRemainingAmount =
-          grandTotal - newTotalPaid;
-
-        // --------------------------------------
-        // กำหนดสถานะใหม่
-        // --------------------------------------
-
-        let newStatus = invoice.status;
-
-        if (
-          newRemainingAmount <= 0
-        ) {
-          newStatus = "PAID";
-        } else {
-          newStatus = "PARTIAL";
-        }
-
-        // --------------------------------------
-        // Update Invoice
-        // --------------------------------------
-
-        const updatedInvoice =
-          await tx.invoice.update({
-            where: {
-              id: invoice.id,
-            },
-            data: {
-              status: newStatus,
-            },
-          });
-
-        return {
-          payment,
-          invoice: updatedInvoice,
-          totalPaid: newTotalPaid,
-          remainingAmount:
-            Math.max(
-              newRemainingAmount,
-              0
-            ),
-        };
+      if (locked.length === 0) {
+        throw new ApiError(404, "ไม่พบ Invoice ที่ต้องการรับชำระ");
       }
-    );
 
-    // ==========================================
-    // สำเร็จ
-    // ==========================================
+      // Re-read status and payments after taking the lock.
+      const invoice = await tx.invoice.findUnique({
+        where: { id: invoiceId },
+        select: {
+          id: true,
+          status: true,
+          grandTotal: true,
+          payments: { select: { amount: true } },
+        },
+      });
+
+      if (!invoice) {
+        throw new ApiError(404, "ไม่พบ Invoice ที่ต้องการรับชำระ");
+      }
+
+      const blockedReason = paymentBlockedReason(invoice.status);
+      if (blockedReason) {
+        throw new ApiError(409, blockedReason);
+      }
+
+      const paidAmounts = invoice.payments.map((payment) => payment.amount);
+      const before = paymentSummary(invoice.grandTotal, paidAmounts);
+
+      if (before.isFullyPaid) {
+        throw new ApiError(409, "Invoice นี้ชำระเงินครบแล้ว");
+      }
+
+      if (compareMoney(amount, before.remaining) > 0) {
+        throw new ApiError(400, exceedsRemainingMessage(before.remaining));
+      }
+
+      const payment = await tx.payment.create({
+        data: {
+          paymentDate: paymentDate.date,
+          // String keeps the exact 2-decimal value (no float on the way to DECIMAL(14,2)).
+          amount: amount.toFixed(2),
+          paymentMethod,
+          referenceNumber: optionalText(body.referenceNumber),
+          note: optionalText(body.note),
+          receivedBy,
+          invoiceId: invoice.id,
+        },
+      });
+
+      const after = paymentSummary(invoice.grandTotal, [...paidAmounts, amount]);
+
+      const updatedInvoice = await tx.invoice.update({
+        where: { id: invoice.id },
+        data: { status: statusAfterPayment(after) },
+      });
+
+      return {
+        payment,
+        invoice: updatedInvoice,
+        totalPaid: after.paid,
+        remainingAmount: after.remaining,
+      };
+    });
 
     return NextResponse.json(
       {
-        message:
-          "บันทึกการรับชำระเงินสำเร็จ",
-
+        message: "บันทึกการรับชำระเงินสำเร็จ",
         payment: result.payment,
-
         invoice: result.invoice,
-
-        totalPaid:
-          result.totalPaid,
-
-        remainingAmount:
-          result.remainingAmount,
+        totalPaid: result.totalPaid,
+        remainingAmount: result.remainingAmount,
       },
-      {
-        status: 201,
-      }
+      { status: 201 }
     );
   } catch (error) {
-    console.error(
-      "POST /api/payments error:",
-      error
-    );
-
-    // ==========================================
-    // ไม่พบ Invoice
-    // ==========================================
-
-    if (
-      error instanceof Error &&
-      error.message ===
-        "INVOICE_NOT_FOUND"
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "ไม่พบ Invoice ที่ต้องการรับชำระ",
-        },
-        {
-          status: 404,
-        }
-      );
-    }
-
-    // ==========================================
-    // Invoice ถูกยกเลิก
-    // ==========================================
-
-    if (
-      error instanceof Error &&
-      error.message ===
-        "INVOICE_CANCELLED"
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "Invoice นี้ถูกยกเลิกแล้ว ไม่สามารถรับชำระเงินได้",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
-
-    // ==========================================
-    // Invoice จ่ายครบแล้ว
-    // ==========================================
-
-    if (
-      error instanceof Error &&
-      error.message ===
-        "INVOICE_ALREADY_PAID"
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "Invoice นี้ชำระเงินครบแล้ว",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
-
-    // ==========================================
-    // จ่ายเกิน
-    // ==========================================
-
-    if (
-      error instanceof Error &&
-      error.message ===
-        "PAYMENT_EXCEEDS_REMAINING"
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "จำนวนเงินที่รับชำระมากกว่ายอดคงเหลือ",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
-
-    // ==========================================
-    // Error อื่น
-    // ==========================================
-
-    return NextResponse.json(
-      {
-        error:
-          "ไม่สามารถบันทึกการรับชำระเงินได้",
-      },
-      {
-        status: 500,
-      }
-    );
+    return handleApiError(error, "ไม่สามารถบันทึกการรับชำระเงินได้", {
+      notFound: "ไม่พบ Invoice ที่ต้องการรับชำระ",
+    });
   }
 }
