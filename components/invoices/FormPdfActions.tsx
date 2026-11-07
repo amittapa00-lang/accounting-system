@@ -1,12 +1,24 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronDown, Download, FileText, Printer, RotateCcw, Settings2 } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  ChevronDown,
+  Download,
+  FileText,
+  Printer,
+  RotateCcw,
+  Settings2,
+  type LucideIcon,
+} from "lucide-react";
 
 import { Button, ButtonAnchor } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { cn } from "@/components/ui/cn";
-import { Field, Input } from "@/components/ui/form";
+import { Input } from "@/components/ui/form";
 
 /**
  * Links to the M-T82-01 form PDF (see app/api/invoices/[id]/pdf):
@@ -34,6 +46,81 @@ function readOffset(): Offset {
 function clamp(value: number) {
   if (!Number.isFinite(value)) return 0;
   return Math.max(-MAX_OFFSET, Math.min(MAX_OFFSET, Math.round(value * 10) / 10));
+}
+
+const STEP = 0.5;
+
+/** "ขวา 2 มม., ขึ้น 1.5 มม." */
+function describeOffset({ dx, dy }: Offset) {
+  const parts: string[] = [];
+  if (dx) parts.push(`${dx > 0 ? "ขวา" : "ซ้าย"} ${Math.abs(dx)} มม.`);
+  if (dy) parts.push(`${dy > 0 ? "ลง" : "ขึ้น"} ${Math.abs(dy)} มม.`);
+  return parts.join(", ");
+}
+
+/** "-", "-4", "4.", "4.5" are fine while typing; only complete numbers are applied. */
+const PARTIAL_NUMBER = /^-?\d*(\.\d*)?$/;
+
+/**
+ * One axis of the print offset: [← less] [number] [more →].
+ * A plain controlled <input type="number"> cannot accept a typed "-" (the half-typed value
+ * reads as empty and snaps back to 0), so the text being typed is kept separately.
+ */
+function OffsetControl({
+  id,
+  label,
+  lessLabel,
+  moreLabel,
+  LessIcon,
+  MoreIcon,
+  value,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  lessLabel: string;
+  moreLabel: string;
+  LessIcon: LucideIcon;
+  MoreIcon: LucideIcon;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+
+  function step(direction: -1 | 1) {
+    setDraft(null);
+    onChange(clamp(value + direction * STEP));
+  }
+
+  return (
+    <div className="min-w-0">
+      <label htmlFor={id} className="mb-1.5 block text-sm font-medium text-slate-700">
+        {label} <span className="font-normal text-slate-500">(มม.)</span>
+      </label>
+      <div className="flex items-center gap-1.5">
+        <Button variant="outline" size="sm" onClick={() => step(-1)} aria-label={`เลื่อน${lessLabel} ${STEP} มม.`}>
+          <LessIcon /> {lessLabel}
+        </Button>
+        <Input
+          id={id}
+          inputMode="decimal"
+          value={draft ?? String(value)}
+          onChange={(e) => {
+            const text = e.target.value.trim();
+            if (!PARTIAL_NUMBER.test(text)) return;
+            setDraft(text);
+            const n = Number(text);
+            if (text !== "" && text !== "-" && Number.isFinite(n)) onChange(clamp(n));
+          }}
+          onBlur={() => setDraft(null)}
+          className="h-8 min-w-0 flex-1 text-center tabular-nums"
+        />
+        <Button variant="outline" size="sm" onClick={() => step(1)} aria-label={`เลื่อน${moreLabel} ${STEP} มม.`}>
+          {moreLabel} <MoreIcon />
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 export default function FormPdfActions({ invoiceId }: { invoiceId: string }) {
@@ -106,9 +193,7 @@ export default function FormPdfActions({ invoiceId }: { invoiceId: string }) {
         </div>
 
         {hasOffset && !showSettings && (
-          <p className="text-xs text-slate-500">
-            ใช้ตำแหน่งพิมพ์ที่ตั้งไว้: ซ้าย/ขวา {offset.dx} มม., ขึ้น/ลง {offset.dy} มม.
-          </p>
+          <p className="text-xs text-slate-500">ใช้ตำแหน่งพิมพ์ที่ตั้งไว้: {describeOffset(offset)}</p>
         )}
 
         {showSettings && (
@@ -123,33 +208,29 @@ export default function FormPdfActions({ invoiceId }: { invoiceId: string }) {
               <li>ถ้าข้อมูลไม่ตรงช่อง ให้เลื่อนตำแหน่งด้านล่าง แล้วเปิดไฟล์พิมพ์ใหม่</li>
             </ul>
 
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              <Field label="เลื่อนซ้าย/ขวา (มม., + = ขวา)" htmlFor="form-print-dx" className="min-w-0">
-                <Input
-                  id="form-print-dx"
-                  type="number"
-                  step="0.5"
-                  min={-MAX_OFFSET}
-                  max={MAX_OFFSET}
-                  value={offset.dx}
-                  onChange={(e) => update({ ...offset, dx: Number(e.target.value) })}
-                  className="text-right tabular-nums"
-                />
-              </Field>
-
-              <Field label="เลื่อนขึ้น/ลง (มม., + = ลง)" htmlFor="form-print-dy" className="min-w-0">
-                <Input
-                  id="form-print-dy"
-                  type="number"
-                  step="0.5"
-                  min={-MAX_OFFSET}
-                  max={MAX_OFFSET}
-                  value={offset.dy}
-                  onChange={(e) => update({ ...offset, dy: Number(e.target.value) })}
-                  className="text-right tabular-nums"
-                />
-              </Field>
+            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-1">
+              <OffsetControl
+                id="form-print-dx"
+                label="ซ้าย / ขวา"
+                lessLabel="ซ้าย"
+                moreLabel="ขวา"
+                LessIcon={ArrowLeft}
+                MoreIcon={ArrowRight}
+                value={offset.dx}
+                onChange={(dx) => update({ ...offset, dx })}
+              />
+              <OffsetControl
+                id="form-print-dy"
+                label="ขึ้น / ลง"
+                lessLabel="ขึ้น"
+                moreLabel="ลง"
+                LessIcon={ArrowUp}
+                MoreIcon={ArrowDown}
+                value={offset.dy}
+                onChange={(dy) => update({ ...offset, dy })}
+              />
             </div>
+            <p className="mt-2 text-xs text-slate-500">กดลูกศรครั้งละ {STEP} มม. หรือพิมพ์ตัวเลขเอง (ติดลบได้)</p>
 
             {hasOffset && (
               <Button variant="ghost" size="sm" onClick={() => update({ dx: 0, dy: 0 })} className="mt-3 -ml-2">
