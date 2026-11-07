@@ -15,7 +15,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="th">
-      <body>
+      {/* Browser extensions (e.g. ColorZilla) inject attributes into <body> before hydration */}
+      <body suppressHydrationWarning>
         <Providers>{children}</Providers>
       </body>
     </html>
