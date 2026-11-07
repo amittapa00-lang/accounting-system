@@ -293,6 +293,15 @@ export default async function InvoicesPage() {
                         >
                           ดูรายละเอียด
                         </Link>
+
+                         <a
+      href={`/api/invoices/${invoice.id}/excel`}
+      className="inline-flex whitespace-nowrap rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+    >
+      ↓ ดาวน์โหลด Excel
+    </a>
+
+
                       </td>
                     </tr>
                   ))

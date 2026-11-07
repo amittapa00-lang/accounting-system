@@ -21,7 +21,7 @@ type PageProps = {
    false = ปิดกริด (ใช้ตอนพิมพ์จริง)
 ========================================================= */
 
-const DEBUG = false;
+const DEBUG = true;
 
 /* =========================================================
    OFFSET ปรับทั้งใบ (mm)
@@ -39,24 +39,24 @@ const OFFSET_Y = 0;
 ========================================================= */
 
 const POS = {
-  invoiceNumber: { left: 185.5, top: 28.5, width: 24 },
-  invoiceDate: { left: 185.5, top: 34.5, width: 24 },
+  invoiceNumber: { left: 165, top: 29, width: 25 },
+  invoiceDate: { left: 165, top: 35, width: 25 },
 
-  customerCode: { left: 44.5, top: 56.5, width: 30 },
+  customerCode: { left: 45, top: 55, width: 30 },
   customerName: { left: 15, top: 67, width: 125 },
   customerAddress: { left: 15, top: 71.5, width: 125 },
-  shipTo: { left: 139, top: 67, width: 61 },
+  shipTo: { left: 140, top: 60, width: 60 },
 
-  saleOrder: { left: 20, top: 81.5, width: 90 },
-  poNumber: { left: 115, top: 81.5, width: 33 },
-  saleName: { left: 150, top: 81.5, width: 25 },
-  entryBy: { left: 177, top: 81.5, width: 23 },
+  saleOrder: { left: 20, top: 95, width: 90 },
+  poNumber: { left: 115, top: 95, width: 33 },
+  saleName: { left: 150, top: 95, width: 25 },
+  entryBy: { left: 177, top: 95, width: 23 },
 
-  subtotal: { left: 178, top: 218, width: 22 },
-  vat: { left: 178, top: 228, width: 22 },
-  grandTotal: { left: 178, top: 238, width: 22 },
+  subtotal: { left: 178, top: 230, width: 22 },
+  vat: { left: 178, top: 240, width: 22 },
+  grandTotal: { left: 178, top: 250, width: 22 },
 
-  amountInWords: { left: 26, top: 237, width: 150 },
+  amountInWords: { left: 15, top: 252, width: 150 },
 };
 
 /* =========================================================
@@ -74,6 +74,7 @@ const COL = {
   discount: { left: 143.5, width: 29 },
   amount: { left: 173, width: 27 },
 };
+
 
 /* =========================================================
    FORMAT

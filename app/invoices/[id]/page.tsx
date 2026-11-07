@@ -128,6 +128,11 @@ export default async function InvoiceDetailPage({
           id: true,
           poNumber: true,
           poDate: true,
+          billPlacement: true,
+          contactPhone: true,
+          contactMobile: true,
+          acceptanceCondition: true,
+          note: true,
         },
       },
       items: {
@@ -152,15 +157,36 @@ export default async function InvoiceDetailPage({
   // ==========================================
 
   const totalPaid = invoice.payments.reduce(
-    (sum, payment) =>
-      sum + Number(payment.amount),
+    (sum, payment) => sum + Number(payment.amount),
     0
   );
 
   const grandTotal = Number(invoice.grandTotal);
 
-  const remainingAmount =
-    grandTotal - totalPaid;
+  const remainingAmount = grandTotal - totalPaid;
+
+  // ==========================================
+  // สถานะวางบิล / รับเงิน
+  // ==========================================
+
+  const isFullyPaid = grandTotal > 0 && remainingAmount <= 0.005;
+  const hasPayment = totalPaid > 0;
+
+  // ถือว่า "วางบิลแล้ว" เมื่อออก Invoice แล้ว (ไม่ใช่ฉบับร่าง/ยกเลิก)
+  const isBilled =
+    invoice.status !== "DRAFT" && invoice.status !== "CANCELLED";
+
+  const paymentStateLabel = isFullyPaid
+    ? "รับเงินแล้ว"
+    : hasPayment
+    ? "รับเงินบางส่วน"
+    : "ยังไม่ได้รับเงิน";
+
+  const paymentStateClass = isFullyPaid
+    ? "bg-emerald-100 text-emerald-700"
+    : hasPayment
+    ? "bg-blue-100 text-blue-700"
+    : "bg-slate-100 text-slate-700";
 
   return (
     <main className="min-h-screen bg-slate-100 p-6">
@@ -181,48 +207,41 @@ export default async function InvoiceDetailPage({
           </div>
 
           <div className="flex flex-wrap gap-3">
-  <Link
-    href="/invoices"
-    className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-  >
-    กลับ
-  </Link>
+            <Link
+              href="/invoices"
+              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              กลับ
+            </Link>
 
-  <Link
-    href={`/purchase-orders/${invoice.purchaseOrder.id}`}
-    className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100"
-  >
-    ดู Purchase Order
-  </Link>
+            <Link
+              href={`/purchase-orders/${invoice.purchaseOrder.id}`}
+              className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100"
+            >
+              ดู Purchase Order
+            </Link>
 
-  {invoice.status === "DRAFT" && (
-    <IssueInvoiceButton
-      invoiceId={invoice.id}
-    />
-  )}
+            {invoice.status === "DRAFT" && (
+              <IssueInvoiceButton invoiceId={invoice.id} />
+            )}
 
-  {remainingAmount > 0 &&
-    invoice.status !== "DRAFT" && (
-      <Link
-        href={`/payments/new?invoiceId=${invoice.id}`}
-        className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
-      >
-        รับชำระเงิน
-      </Link>
+            {remainingAmount > 0 && invoice.status !== "DRAFT" && (
+              <Link
+                href={`/payments/new?invoiceId=${invoice.id}`}
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+              >
+                รับชำระเงิน
+              </Link>
+            )}
 
-      
-    )}
-    <Link
-  href={`/invoices/${invoice.id}/print`}
-  target="_blank"
+           <a
+  href={`/api/invoices/${invoice.id}/xlsx`}
   className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
 >
-  🖨️ พิมพ์ / PDF
-</Link>
-</div>
-
+  📄 ดาวน์โหลด Excel
+</a>
+          </div>
         </div>
-        
 
         {/* ================================== */}
         {/* Invoice Information */}
@@ -238,9 +257,7 @@ export default async function InvoiceDetailPage({
 
             <div className="space-y-3 text-sm">
               <div className="flex justify-between gap-4">
-                <span className="text-slate-500">
-                  Invoice No.
-                </span>
+                <span className="text-slate-500">Invoice No.</span>
 
                 <span className="font-semibold text-slate-800">
                   {invoice.invoiceNumber}
@@ -248,45 +265,31 @@ export default async function InvoiceDetailPage({
               </div>
 
               <div className="flex justify-between gap-4">
-                <span className="text-slate-500">
-                  ประเภทเอกสาร
-                </span>
+                <span className="text-slate-500">ประเภทเอกสาร</span>
 
                 <span className="text-right text-slate-800">
-                  {getDocumentTypeLabel(
-                    invoice.documentType
-                  )}
+                  {getDocumentTypeLabel(invoice.documentType)}
                 </span>
               </div>
 
               <div className="flex justify-between gap-4">
-                <span className="text-slate-500">
-                  วันที่ Invoice
-                </span>
+                <span className="text-slate-500">วันที่ Invoice</span>
 
                 <span className="text-slate-800">
-                  {formatDate(
-                    invoice.invoiceDate
-                  )}
+                  {formatDate(invoice.invoiceDate)}
                 </span>
               </div>
 
               <div className="flex justify-between gap-4">
-                <span className="text-slate-500">
-                  วันครบกำหนด
-                </span>
+                <span className="text-slate-500">วันครบกำหนด</span>
 
                 <span className="text-slate-800">
-                  {invoice.dueDate
-                    ? formatDate(invoice.dueDate)
-                    : "-"}
+                  {invoice.dueDate ? formatDate(invoice.dueDate) : "-"}
                 </span>
               </div>
 
               <div className="flex justify-between gap-4">
-                <span className="text-slate-500">
-                  Payment Term
-                </span>
+                <span className="text-slate-500">Payment Term</span>
 
                 <span className="text-slate-800">
                   {invoice.paymentTerm || "-"}
@@ -294,9 +297,7 @@ export default async function InvoiceDetailPage({
               </div>
 
               <div className="flex justify-between gap-4">
-                <span className="text-slate-500">
-                  Sale Order No.
-                </span>
+                <span className="text-slate-500">Sale Order No.</span>
 
                 <span className="text-slate-800">
                   {invoice.saleOrderNumber || "-"}
@@ -304,18 +305,38 @@ export default async function InvoiceDetailPage({
               </div>
 
               <div className="flex items-center justify-between gap-4">
-                <span className="text-slate-500">
-                  สถานะ
-                </span>
+                <span className="text-slate-500">สถานะ</span>
 
                 <span
                   className={`rounded-full px-3 py-1 text-xs font-semibold ${getStatusClass(
                     invoice.status
                   )}`}
                 >
-                  {getStatusLabel(
-                    invoice.status
-                  )}
+                  {getStatusLabel(invoice.status)}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-slate-500">สถานะวางบิล</span>
+
+                <span
+                  className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                    isBilled
+                      ? "bg-emerald-100 text-emerald-700"
+                      : "bg-slate-100 text-slate-700"
+                  }`}
+                >
+                  {isBilled ? "วางบิลแล้ว" : "ยังไม่วางบิล"}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-slate-500">สถานะรับเงิน</span>
+
+                <span
+                  className={`rounded-full px-3 py-1 text-xs font-semibold ${paymentStateClass}`}
+                >
+                  {paymentStateLabel}
                 </span>
               </div>
             </div>
@@ -330,20 +351,15 @@ export default async function InvoiceDetailPage({
 
             <div className="space-y-3 text-sm">
               <div>
-                <p className="text-slate-500">
-                  รหัสลูกค้า
-                </p>
+                <p className="text-slate-500">รหัสลูกค้า</p>
 
                 <p className="font-semibold text-slate-800">
-                  {invoice.customerCodeSnapshot ||
-                    "-"}
+                  {invoice.customerCodeSnapshot || "-"}
                 </p>
               </div>
 
               <div>
-                <p className="text-slate-500">
-                  ชื่อลูกค้า
-                </p>
+                <p className="text-slate-500">ชื่อลูกค้า</p>
 
                 <p className="font-semibold text-slate-800">
                   {invoice.customerNameSnapshot}
@@ -351,34 +367,79 @@ export default async function InvoiceDetailPage({
               </div>
 
               <div>
-                <p className="text-slate-500">
-                  ที่อยู่
-                </p>
+                <p className="text-slate-500">ที่อยู่</p>
 
                 <p className="whitespace-pre-wrap text-slate-800">
-                  {invoice.customerAddressSnapshot ||
-                    "-"}
+                  {invoice.customerAddressSnapshot || "-"}
                 </p>
               </div>
 
               <div>
-                <p className="text-slate-500">
-                  เลขประจำตัวผู้เสียภาษี
-                </p>
+                <p className="text-slate-500">เลขประจำตัวผู้เสียภาษี</p>
 
                 <p className="text-slate-800">
-                  {invoice.customerTaxIdSnapshot ||
-                    "-"}
+                  {invoice.customerTaxIdSnapshot || "-"}
                 </p>
               </div>
 
               <div>
-                <p className="text-slate-500">
-                  สถานที่จัดส่ง
-                </p>
+                <p className="text-slate-500">สถานที่จัดส่ง</p>
 
                 <p className="whitespace-pre-wrap text-slate-800">
                   {invoice.shipToSnapshot || "-"}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Purchase Order Info */}
+
+          <div className="rounded-xl border border-slate-200 bg-white p-6 lg:col-span-2">
+            <h2 className="mb-4 text-lg font-bold text-slate-800">
+              ข้อมูลผู้ติดต่อและเงื่อนไข (จาก PO{" "}
+              {invoice.purchaseOrder.poNumber})
+            </h2>
+
+            <div className="grid gap-4 text-sm md:grid-cols-2">
+              <div>
+                <p className="text-slate-500">โทรศัพท์ผู้ติดต่อ</p>
+
+                <p className="text-slate-800">
+                  {invoice.purchaseOrder.contactPhone || "-"}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-slate-500">มือถือผู้ติดต่อ</p>
+
+                <p className="text-slate-800">
+                  {invoice.purchaseOrder.contactMobile || "-"}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-slate-500">สถานที่วางบิล</p>
+
+                <p className="whitespace-pre-wrap text-slate-800">
+                  {invoice.purchaseOrder.billPlacement || "-"}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-slate-500">
+                  เงื่อนไขการรับสินค้า / ตรวจรับ
+                </p>
+
+                <p className="whitespace-pre-wrap text-slate-800">
+                  {invoice.purchaseOrder.acceptanceCondition || "-"}
+                </p>
+              </div>
+
+              <div className="md:col-span-2">
+                <p className="text-slate-500">หมายเหตุ</p>
+
+                <p className="whitespace-pre-wrap text-slate-800">
+                  {invoice.purchaseOrder.note || "-"}
                 </p>
               </div>
             </div>
@@ -432,10 +493,7 @@ export default async function InvoiceDetailPage({
 
               <tbody>
                 {invoice.items.map((item) => (
-                  <tr
-                    key={item.id}
-                    className="border-b border-slate-100"
-                  >
+                  <tr key={item.id} className="border-b border-slate-100">
                     <td className="px-4 py-3 text-center text-slate-600">
                       {item.itemNo}
                     </td>
@@ -445,11 +503,7 @@ export default async function InvoiceDetailPage({
                     </td>
 
                     <td className="px-4 py-3 text-right text-slate-700">
-                      {Number(
-                        item.quantity
-                      ).toLocaleString(
-                        "th-TH"
-                      )}
+                      {Number(item.quantity).toLocaleString("th-TH")}
                     </td>
 
                     <td className="px-4 py-3 text-slate-700">
@@ -457,24 +511,15 @@ export default async function InvoiceDetailPage({
                     </td>
 
                     <td className="px-4 py-3 text-right text-slate-700">
-                      {formatMoney(
-                        Number(item.unitPrice)
-                      )}
+                      {formatMoney(Number(item.unitPrice))}
                     </td>
 
                     <td className="px-4 py-3 text-right text-slate-700">
-                      {Number(
-                        item.discountPercent
-                      ).toLocaleString(
-                        "th-TH"
-                      )}
-                      %
+                      {Number(item.discountPercent).toLocaleString("th-TH")}%
                     </td>
 
                     <td className="px-4 py-3 text-right font-medium text-slate-800">
-                      {formatMoney(
-                        Number(item.amount)
-                      )}
+                      {formatMoney(Number(item.amount))}
                     </td>
                   </tr>
                 ))}
@@ -490,28 +535,18 @@ export default async function InvoiceDetailPage({
         <div className="mb-6 flex justify-end">
           <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6">
             <div className="flex justify-between py-2 text-sm">
-              <span className="text-slate-500">
-                Subtotal
-              </span>
+              <span className="text-slate-500">Subtotal</span>
 
               <span className="font-medium text-slate-800">
-                {formatMoney(
-                  Number(invoice.subtotal)
-                )}{" "}
-                บาท
+                {formatMoney(Number(invoice.subtotal))} บาท
               </span>
             </div>
 
             <div className="flex justify-between py-2 text-sm">
-              <span className="text-slate-500">
-                VAT
-              </span>
+              <span className="text-slate-500">VAT</span>
 
               <span className="font-medium text-slate-800">
-                {formatMoney(
-                  Number(invoice.vat)
-                )}{" "}
-                บาท
+                {formatMoney(Number(invoice.vat))} บาท
               </span>
             </div>
 
@@ -535,9 +570,7 @@ export default async function InvoiceDetailPage({
 
         <div className="mb-6 grid gap-4 md:grid-cols-3">
           <div className="rounded-xl border border-slate-200 bg-white p-5">
-            <p className="text-sm text-slate-500">
-              ยอด Invoice
-            </p>
+            <p className="text-sm text-slate-500">ยอด Invoice</p>
 
             <p className="mt-2 text-2xl font-bold text-slate-800">
               {formatMoney(grandTotal)} บาท
@@ -545,9 +578,7 @@ export default async function InvoiceDetailPage({
           </div>
 
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5">
-            <p className="text-sm text-emerald-700">
-              ชำระแล้ว
-            </p>
+            <p className="text-sm text-emerald-700">ชำระแล้ว</p>
 
             <p className="mt-2 text-2xl font-bold text-emerald-700">
               {formatMoney(totalPaid)} บาท
@@ -563,9 +594,7 @@ export default async function InvoiceDetailPage({
           >
             <p
               className={`text-sm ${
-                remainingAmount > 0
-                  ? "text-red-700"
-                  : "text-emerald-700"
+                remainingAmount > 0 ? "text-red-700" : "text-emerald-700"
               }`}
             >
               คงเหลือ
@@ -573,15 +602,10 @@ export default async function InvoiceDetailPage({
 
             <p
               className={`mt-2 text-2xl font-bold ${
-                remainingAmount > 0
-                  ? "text-red-700"
-                  : "text-emerald-700"
+                remainingAmount > 0 ? "text-red-700" : "text-emerald-700"
               }`}
             >
-              {formatMoney(
-                Math.max(remainingAmount, 0)
-              )}{" "}
-              บาท
+              {formatMoney(Math.max(remainingAmount, 0))} บาท
             </p>
           </div>
         </div>
@@ -598,9 +622,7 @@ export default async function InvoiceDetailPage({
               </h2>
 
               <p className="mt-1 text-sm text-slate-500">
-                รับชำระแล้ว{" "}
-                {invoice.payments.length}{" "}
-                รายการ
+                รับชำระแล้ว {invoice.payments.length} รายการ
               </p>
             </div>
 
@@ -665,51 +687,40 @@ export default async function InvoiceDetailPage({
                 </thead>
 
                 <tbody>
-                  {invoice.payments.map(
-                    (payment, index) => (
-                      <tr
-                        key={payment.id}
-                        className="border-b border-slate-100 hover:bg-slate-50"
-                      >
-                        <td className="px-4 py-3 text-center text-slate-500">
-                          {index + 1}
-                        </td>
+                  {invoice.payments.map((payment, index) => (
+                    <tr
+                      key={payment.id}
+                      className="border-b border-slate-100 hover:bg-slate-50"
+                    >
+                      <td className="px-4 py-3 text-center text-slate-500">
+                        {index + 1}
+                      </td>
 
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                          {formatDate(
-                            payment.paymentDate
-                          )}
-                        </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                        {formatDate(payment.paymentDate)}
+                      </td>
 
-                        <td className="px-4 py-3 text-slate-700">
-                          {getPaymentMethodLabel(
-                            payment.paymentMethod
-                          )}
-                        </td>
+                      <td className="px-4 py-3 text-slate-700">
+                        {getPaymentMethodLabel(payment.paymentMethod)}
+                      </td>
 
-                        <td className="px-4 py-3 text-slate-700">
-                          {payment.referenceNumber ||
-                            "-"}
-                        </td>
+                      <td className="px-4 py-3 text-slate-700">
+                        {payment.referenceNumber || "-"}
+                      </td>
 
-                        <td className="px-4 py-3 text-slate-700">
-                          {payment.receivedBy ||
-                            "-"}
-                        </td>
+                      <td className="px-4 py-3 text-slate-700">
+                        {payment.receivedBy || "-"}
+                      </td>
 
-                        <td className="whitespace-nowrap px-4 py-3 text-right font-semibold text-emerald-600">
-                          {formatMoney(
-                            Number(payment.amount)
-                          )}{" "}
-                          บาท
-                        </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right font-semibold text-emerald-600">
+                        {formatMoney(Number(payment.amount))} บาท
+                      </td>
 
-                        <td className="px-4 py-3 text-slate-600">
-                          {payment.note || "-"}
-                        </td>
-                      </tr>
-                    )
-                  )}
+                      <td className="px-4 py-3 text-slate-600">
+                        {payment.note || "-"}
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
 
                 <tfoot className="bg-slate-50">
@@ -722,8 +733,7 @@ export default async function InvoiceDetailPage({
                     </td>
 
                     <td className="px-4 py-4 text-right text-lg font-bold text-emerald-600">
-                      {formatMoney(totalPaid)}{" "}
-                      บาท
+                      {formatMoney(totalPaid)} บาท
                     </td>
 
                     <td />
