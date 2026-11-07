@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Providers from "./providers";
 
 import "./globals.css";
 
@@ -16,9 +15,7 @@ export default function RootLayout({
   return (
     <html lang="th">
       {/* Browser extensions (e.g. ColorZilla) inject attributes into <body> before hydration */}
-      <body suppressHydrationWarning>
-        <Providers>{children}</Providers>
-      </body>
+      <body suppressHydrationWarning>{children}</body>
     </html>
   );
 }

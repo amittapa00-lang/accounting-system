@@ -4,7 +4,7 @@ import fs from "fs/promises";
 import path from "path";
 import ExcelJS from "exceljs";
 
-import authOptions from "@/auth";
+import authOptions from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 type RouteContext = {
@@ -117,10 +117,9 @@ export async function GET(
       );
     }
 
-    // ไฟล์ Excel ต้นแบบ
+    // ไฟล์ Excel ต้นแบบ (อยู่นอก public/ เพื่อไม่ให้ดาวน์โหลดได้โดยไม่ล็อกอิน)
     const templatePath = path.join(
       process.cwd(),
-      "public",
       "templates",
       "invoice-template.xlsx"
     );
@@ -194,7 +193,7 @@ export async function GET(
       worksheet.getCell(`F${row}`).value = toNumber(item.quantity);
       worksheet.getCell(`G${row}`).value = item.unit ?? "";
       worksheet.getCell(`H${row}`).value = toNumber(item.unitPrice);
-      worksheet.getCell(`I${row}`).value = toNumber(item.discountPercent);
+      worksheet.getCell(`I${row}`).value = toNumber(item.discount);
       worksheet.getCell(`J${row}`).value = toNumber(item.amount);
     });
 

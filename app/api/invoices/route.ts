@@ -1,7 +1,7 @@
 import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
-import authOptions from "../../../auth";
-import { prisma } from "../../../lib/prisma";
+import authOptions from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 
 function getInvoiceNumber(date: Date, runningNumber: number) {
   const year = date.getFullYear();
@@ -142,10 +142,8 @@ export async function POST(request: Request) {
           quantity: item.quantity,
           unit: item.unit,
           unitPrice: item.unitPrice,
-          discountPercent:
-            item.discountType === "PERCENT"
-              ? item.discount
-              : 0,
+          discount: item.discount,
+          discountType: item.discountType,
           amount,
         };
       });
