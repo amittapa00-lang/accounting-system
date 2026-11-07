@@ -149,6 +149,17 @@ export default async function InvoicesPage() {
                             {/* Invoice ที่ยกเลิกแล้วดาวน์โหลดไม่ได้ (route ตอบ 409) */}
                             {!isCancelled && (
                               <a
+                                href={`/api/invoices/${invoice.id}/pdf`}
+                                target="_blank"
+                                rel="noopener"
+                                className="inline-flex whitespace-nowrap rounded-lg bg-slate-600 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700"
+                              >
+                                📄 PDF
+                              </a>
+                            )}
+
+                            {!isCancelled && (
+                              <a
                                 href={`/api/invoices/${invoice.id}/excel`}
                                 className="inline-flex whitespace-nowrap rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
                               >

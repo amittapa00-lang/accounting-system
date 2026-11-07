@@ -15,6 +15,7 @@ import { paymentSummary } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 
 import DraftInvoiceActions from "@/components/invoices/DraftInvoiceActions";
+import FormPdfActions from "@/components/invoices/FormPdfActions";
 
 export const instant = false;
 
@@ -102,7 +103,7 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
         {/* Header */}
         {/* ================================== */}
 
-        <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-center">
+        <div className="mb-6 flex flex-col gap-4">
           <div>
             <h1 className="text-2xl font-bold text-slate-800">Invoice {invoice.invoiceNumber}</h1>
 
@@ -135,15 +136,7 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
               </Link>
             )}
 
-            {!isCancelled && (
-              <Link
-                href={`/invoices/${invoice.id}/print`}
-                target="_blank"
-                className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-              >
-                🖨️ พิมพ์ / PDF
-              </Link>
-            )}
+            {!isCancelled && <FormPdfActions invoiceId={invoice.id} />}
           </div>
         </div>
 
