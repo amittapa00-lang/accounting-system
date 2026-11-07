@@ -2,6 +2,14 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { ChevronRight, Search, SearchX, UserPlus, Users, X } from "lucide-react";
+
+import { Badge } from "@/components/ui/badge";
+import { Button, ButtonAnchor, ButtonLink } from "@/components/ui/button";
+import { Card, CardHeader } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/feedback";
+import { Input } from "@/components/ui/form";
+import { Table, Td, Th, Tr } from "@/components/ui/table";
 
 type Customer = {
   id: string;
@@ -41,152 +49,137 @@ export default function CustomerList({
   }, [customers, search]);
 
   return (
-    <div className="rounded-xl bg-white p-6 shadow-sm">
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-gray-900">
-            รายชื่อลูกค้า
-          </h2>
+    <Card>
+      <CardHeader
+        title="รายชื่อลูกค้า"
+        description={
+          <>
+            พบ <span className="font-medium tabular-nums text-slate-700">{filteredCustomers.length}</span> /{" "}
+            <span className="tabular-nums">{customers.length}</span> ราย
+          </>
+        }
+      />
 
-          <p className="mt-1 text-sm text-gray-500">
-            ค้นหาและจัดการข้อมูลลูกค้า
-          </p>
-        </div>
+      {customers.length === 0 ? (
+        <EmptyState
+          icon={Users}
+          title="ยังไม่มีข้อมูลลูกค้า"
+          description="เพิ่มลูกค้ารายแรกจากแบบฟอร์มเพิ่มลูกค้า"
+          action={
+            <ButtonAnchor href="#new-customer" variant="outline" size="sm">
+              <UserPlus /> เพิ่มลูกค้า
+            </ButtonAnchor>
+          }
+        />
+      ) : (
+        <>
+          <div className="border-b border-slate-100 px-5 py-3">
+            <label htmlFor="customer-search" className="sr-only">
+              ค้นหาลูกค้า
+            </label>
 
-        <div className="rounded-lg bg-gray-100 px-3 py-2 text-sm font-semibold text-gray-700">
-          พบ {filteredCustomers.length} / {customers.length} ราย
-        </div>
-      </div>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
 
-      <div className="mt-6">
-        <label
-          htmlFor="customer-search"
-          className="mb-2 block text-sm font-medium text-gray-700"
-        >
-          ค้นหาลูกค้า
-        </label>
+              <Input
+                id="customer-search"
+                type="text"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="ค้นหารหัสลูกค้า, ชื่อลูกค้า, เบอร์โทร หรือเลขผู้เสียภาษี..."
+                className="pl-9 pr-10"
+              />
 
-        <div className="relative">
-          <input
-            id="customer-search"
-            type="text"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="ค้นหารหัสลูกค้า, ชื่อลูกค้า, เบอร์โทร หรือเลขผู้เสียภาษี..."
-            className="w-full rounded-lg border border-gray-300 px-4 py-3 pr-20 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-          />
-
-          {search && (
-            <button
-              type="button"
-              onClick={() => setSearch("")}
-              className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md px-2 py-1 text-sm text-gray-500 hover:bg-gray-100 hover:text-gray-800"
-            >
-              ล้าง
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className="mt-6 overflow-x-auto">
-        {filteredCustomers.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-10 text-center">
-            <p className="font-medium text-gray-600">
-              ไม่พบข้อมูลลูกค้า
-            </p>
-
-            {search && (
-              <p className="mt-2 text-sm text-gray-400">
-                ลองค้นหาด้วยคำอื่น
-              </p>
-            )}
-          </div>
-        ) : (
-          <table className="w-full min-w-[850px] border-collapse">
-            <thead>
-              <tr className="border-b bg-gray-50 text-left">
-                <th className="px-4 py-3 text-sm font-semibold text-gray-700">
-                  รหัส
-                </th>
-
-                <th className="px-4 py-3 text-sm font-semibold text-gray-700">
-                  ชื่อลูกค้า
-                </th>
-
-                <th className="px-4 py-3 text-sm font-semibold text-gray-700">
-                  โทรศัพท์
-                </th>
-
-                <th className="px-4 py-3 text-sm font-semibold text-gray-700">
-                  เลขผู้เสียภาษี
-                </th>
-
-                <th className="px-4 py-3 text-sm font-semibold text-gray-700">
-                  ผู้ติดต่อ
-                </th>
-
-                <th className="px-4 py-3 text-sm font-semibold text-gray-700">
-                  สถานะ
-                </th>
-
-                <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">
-                  จัดการ
-                </th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {filteredCustomers.map((customer) => (
-                <tr
-                  key={customer.id}
-                  className="border-b last:border-b-0 hover:bg-gray-50"
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch("")}
+                  aria-label="ล้างคำค้นหา"
+                  title="ล้าง"
+                  className="absolute right-1.5 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
                 >
-                  <td className="px-4 py-4 text-sm font-semibold text-gray-900">
-                    {customer.code}
-                  </td>
+                  <X className="size-4" />
+                </button>
+              )}
+            </div>
+          </div>
 
-                  <td className="px-4 py-4 text-sm text-gray-800">
-                    {customer.name}
-                  </td>
-
-                  <td className="px-4 py-4 text-sm text-gray-600">
-                    {customer.tel || "-"}
-                  </td>
-
-                  <td className="px-4 py-4 text-sm text-gray-600">
-                    {customer.taxId || "-"}
-                  </td>
-
-                  <td className="px-4 py-4 text-sm text-gray-600">
-                    {customer.contactName || "-"}
-                  </td>
-
-                  <td className="px-4 py-4">
-                    {customer.isActive ? (
-                      <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700">
-                        ใช้งาน
-                      </span>
-                    ) : (
-                      <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-600">
-                        ปิดใช้งาน
-                      </span>
-                    )}
-                  </td>
-
-                  <td className="px-4 py-4 text-center">
-                    <Link
-                      href={`/customers/${customer.id}`}
-                      className="inline-flex rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
-                    >
-                      ดู / แก้ไข
-                    </Link>
-                  </td>
+          {filteredCustomers.length === 0 ? (
+            <EmptyState
+              icon={SearchX}
+              title="ไม่พบข้อมูลลูกค้า"
+              description="ลองค้นหาด้วยคำอื่น"
+              action={
+                <Button variant="outline" size="sm" onClick={() => setSearch("")}>
+                  ล้างการค้นหา
+                </Button>
+              }
+            />
+          ) : (
+            <Table>
+              <thead>
+                <tr>
+                  <Th>ชื่อลูกค้า / รหัส</Th>
+                  <Th>โทรศัพท์</Th>
+                  <Th>เลขผู้เสียภาษี</Th>
+                  <Th>ผู้ติดต่อ</Th>
+                  <Th>สถานะ</Th>
+                  {/* relative: keeps the sr-only text inside the scrolling table on phones */}
+                  <Th align="right" className="relative">
+                    <span className="sr-only">จัดการ</span>
+                  </Th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </div>
+              </thead>
+
+              <tbody>
+                {filteredCustomers.map((customer) => (
+                  <Tr key={customer.id}>
+                    <Td className="min-w-40">
+                      <Link
+                        href={`/customers/${customer.id}`}
+                        className="font-medium text-slate-900 hover:text-brand-700"
+                      >
+                        {customer.name}
+                      </Link>
+                      <p className="text-xs text-slate-500">{customer.code}</p>
+                    </Td>
+
+                    <Td className="whitespace-nowrap">{customer.tel || "-"}</Td>
+
+                    <Td className="whitespace-nowrap tabular-nums">{customer.taxId || "-"}</Td>
+
+                    <Td>{customer.contactName || "-"}</Td>
+
+                    <Td>
+                      {customer.isActive ? (
+                        <Badge tone="success" dot>
+                          ใช้งาน
+                        </Badge>
+                      ) : (
+                        <Badge tone="neutral" dot>
+                          ปิดใช้งาน
+                        </Badge>
+                      )}
+                    </Td>
+
+                    <Td align="right">
+                      <ButtonLink
+                        href={`/customers/${customer.id}`}
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`ดู / แก้ไข ${customer.name}`}
+                        title="ดู / แก้ไข"
+                      >
+                        <ChevronRight />
+                      </ButtonLink>
+                    </Td>
+                  </Tr>
+                ))}
+              </tbody>
+            </Table>
+          )}
+        </>
+      )}
+    </Card>
   );
 }

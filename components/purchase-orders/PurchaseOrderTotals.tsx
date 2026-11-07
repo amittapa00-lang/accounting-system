@@ -1,29 +1,26 @@
 import { formatMoney } from "@/lib/format";
 import type { Totals } from "@/lib/money";
 
-/** Sub Total / VAT / Grand Total box under the PO lines. */
+/** Sub Total / VAT / Grand Total box under the PO lines (sits at the bottom of the items card). */
 export default function PurchaseOrderTotals({ subtotal, vat, grandTotal }: Totals) {
   return (
-    <div className="mt-6 flex justify-end">
-      <div className="w-full max-w-md rounded-lg border border-gray-200 bg-gray-50 p-5">
-        <div className="flex justify-between py-2 text-sm">
-          <span className="text-gray-600">Sub Total</span>
-
-          <span className="font-semibold text-gray-900">฿{formatMoney(subtotal)}</span>
+    <div className="flex justify-end rounded-b-xl border-t border-slate-100 bg-slate-50/60 px-5 py-4">
+      <dl className="w-full max-w-sm space-y-2 text-sm">
+        <div className="flex items-center justify-between gap-4">
+          <dt className="text-slate-500">Sub Total</dt>
+          <dd className="font-medium tabular-nums text-slate-900">฿{formatMoney(subtotal)}</dd>
         </div>
 
-        <div className="flex justify-between border-t py-3 text-sm">
-          <span className="text-gray-600">V.A.T.</span>
-
-          <span className="font-semibold text-gray-900">฿{formatMoney(vat)}</span>
+        <div className="flex items-center justify-between gap-4">
+          <dt className="text-slate-500">V.A.T.</dt>
+          <dd className="font-medium tabular-nums text-slate-900">฿{formatMoney(vat)}</dd>
         </div>
 
-        <div className="flex justify-between border-t pt-3">
-          <span className="font-bold text-gray-900">Grand Total</span>
-
-          <span className="text-xl font-bold text-blue-600">฿{formatMoney(grandTotal)}</span>
+        <div className="flex items-center justify-between gap-4 border-t border-slate-200 pt-3">
+          <dt className="font-semibold text-slate-900">Grand Total</dt>
+          <dd className="text-xl font-semibold tabular-nums text-slate-900">฿{formatMoney(grandTotal)}</dd>
         </div>
-      </div>
+      </dl>
     </div>
   );
 }

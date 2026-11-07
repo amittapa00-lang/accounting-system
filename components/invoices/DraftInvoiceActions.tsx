@@ -2,12 +2,25 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { LoaderCircle, Send, XCircle, type LucideIcon } from "lucide-react";
+
+import { Button, type ButtonVariant } from "@/components/ui/button";
+import { toast } from "@/components/ui/toast";
 
 type Action = "issue" | "cancel";
 
 const ACTIONS: Record<
   Action,
-  { path: string; confirm: string; success: string; failure: string; idle: string; busy: string; className: string }
+  {
+    path: string;
+    confirm: string;
+    success: string;
+    failure: string;
+    idle: string;
+    busy: string;
+    variant: ButtonVariant;
+    icon: LucideIcon;
+  }
 > = {
   issue: {
     path: "issue",
@@ -16,7 +29,8 @@ const ACTIONS: Record<
     failure: "ไม่สามารถออก Invoice ได้",
     idle: "ออก Invoice",
     busy: "กำลังออก Invoice...",
-    className: "bg-blue-600 text-white hover:bg-blue-700",
+    variant: "primary",
+    icon: Send,
   },
   cancel: {
     path: "cancel",
@@ -26,9 +40,13 @@ const ACTIONS: Record<
     failure: "ไม่สามารถยกเลิก Invoice ได้",
     idle: "ยกเลิก Invoice",
     busy: "กำลังยกเลิก...",
-    className: "border border-red-200 bg-white text-red-600 hover:bg-red-50",
+    variant: "dangerOutline",
+    icon: XCircle,
   },
 };
+
+/** Display order: the main action ("ออก Invoice") last, so it sits right-most. */
+const ORDER: Action[] = ["cancel", "issue"];
 
 /** "ออก Invoice" and "ยกเลิก Invoice" buttons for a DRAFT invoice. */
 export default function DraftInvoiceActions({ invoiceId }: { invoiceId: string }) {
@@ -72,29 +90,31 @@ export default function DraftInvoiceActions({ invoiceId }: { invoiceId: string }
       return;
     }
 
-    alert(config.success);
+    toast(config.success);
 
     // Stay disabled: the page re-renders with the new status and these buttons disappear
     router.refresh();
   }
 
   return (
-    <div>
-      <div className="flex flex-wrap gap-3">
-        {(Object.keys(ACTIONS) as Action[]).map((action) => (
-          <button
-            key={action}
-            type="button"
-            onClick={() => run(action)}
-            disabled={pending !== null}
-            className={`rounded-lg px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${ACTIONS[action].className}`}
-          >
-            {pending === action ? ACTIONS[action].busy : ACTIONS[action].idle}
-          </button>
-        ))}
+    <div className="flex min-w-0 flex-col gap-2 sm:items-end">
+      <div className="flex flex-wrap gap-2">
+        {ORDER.map((action) => {
+          const { variant, icon: Icon, busy, idle } = ACTIONS[action];
+          return (
+            <Button key={action} variant={variant} onClick={() => run(action)} disabled={pending !== null}>
+              {pending === action ? <LoaderCircle className="animate-spin" /> : <Icon />}
+              {pending === action ? busy : idle}
+            </Button>
+          );
+        })}
       </div>
 
-      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+      {error && (
+        <p role="alert" className="max-w-sm text-sm text-red-600 sm:text-right">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

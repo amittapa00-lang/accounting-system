@@ -1,17 +1,20 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ClipboardList, Plus, Receipt, Wallet } from "lucide-react";
 
+import { Badge, InvoiceStatusBadge } from "@/components/ui/badge";
+import { ButtonLink } from "@/components/ui/button";
+import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { cn } from "@/components/ui/cn";
+import { DetailBlock, DetailList } from "@/components/ui/data-display";
+import { Alert, EmptyState } from "@/components/ui/feedback";
+import { PageHeader } from "@/components/ui/page-header";
+import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageSession } from "@/lib/auth";
 import { formatDate, formatMoney } from "@/lib/format";
-import { formatLineDiscount, formatQuantity, isBilledInvoiceStatus } from "@/lib/invoices";
-import {
-  documentTypeLabel,
-  invoiceStatusClass,
-  invoiceStatusLabel,
-  OPEN_INVOICE_STATUSES,
-  paymentMethodLabel,
-} from "@/lib/labels";
-import { paymentSummary } from "@/lib/money";
+import { formatLineDiscount, formatQuantity, isBilledInvoiceStatus, isInvoiceOverdue } from "@/lib/invoices";
+import { documentTypeLabel, OPEN_INVOICE_STATUSES, paymentMethodLabel, type Tone } from "@/lib/labels";
+import { paymentSummary, toNumber } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 
 import DraftInvoiceActions from "@/components/invoices/DraftInvoiceActions";
@@ -90,420 +93,359 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
 
   const paymentStateLabel = isFullyPaid ? "รับเงินแล้ว" : hasPayment ? "รับเงินบางส่วน" : "ยังไม่ได้รับเงิน";
 
-  const paymentStateClass = isFullyPaid
-    ? "bg-emerald-100 text-emerald-700"
-    : hasPayment
-      ? "bg-blue-100 text-blue-700"
-      : "bg-slate-100 text-slate-700";
+  const paymentStateTone: Tone = isFullyPaid ? "success" : hasPayment ? "info" : "neutral";
+
+  // Width of the progress bar only (display). Not fully paid implies grandTotal > 0.
+  const paidPercent = isFullyPaid
+    ? 100
+    : Math.min(100, Math.floor((totalPaid / toNumber(invoice.grandTotal)) * 100));
+
+  const receivePaymentHref = `/payments/new?invoiceId=${invoice.id}`;
 
   return (
-    <main className="min-h-screen bg-slate-100 p-6">
-      <div className="mx-auto max-w-7xl">
-        {/* ================================== */}
-        {/* Header */}
-        {/* ================================== */}
-
-        <div className="mb-6 flex flex-col gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Invoice {invoice.invoiceNumber}</h1>
-
-            <p className="mt-1 text-sm text-slate-500">รายละเอียด Invoice</p>
-          </div>
-
-          <div className="flex flex-wrap items-start gap-3">
-            <Link
-              href="/invoices"
-              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-            >
-              กลับ
-            </Link>
-
-            <Link
-              href={`/purchase-orders/${invoice.purchaseOrder.id}`}
-              className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100"
-            >
-              ดู Purchase Order
-            </Link>
+    <>
+      <PageHeader
+        title={invoice.invoiceNumber}
+        description={invoice.customerNameSnapshot}
+        back={{ href: "/invoices", label: "Invoice ทั้งหมด" }}
+        meta={
+          <>
+            <InvoiceStatusBadge status={invoice.status} />
+            {isInvoiceOverdue(invoice.status, invoice.dueDate) && <Badge tone="danger">เกินกำหนดชำระ</Badge>}
+            <Badge tone={isBilled ? "success" : "neutral"}>{isBilled ? "วางบิลแล้ว" : "ยังไม่วางบิล"}</Badge>
+            <Badge tone={paymentStateTone}>{paymentStateLabel}</Badge>
+          </>
+        }
+        actions={
+          <>
+            <ButtonLink href={`/purchase-orders/${invoice.purchaseOrder.id}`} variant="outline">
+              <ClipboardList /> ดู Purchase Order
+            </ButtonLink>
 
             {invoice.status === "DRAFT" && <DraftInvoiceActions invoiceId={invoice.id} />}
 
             {canReceivePayment && (
-              <Link
-                href={`/payments/new?invoiceId=${invoice.id}`}
-                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
-              >
-                รับชำระเงิน
-              </Link>
+              <ButtonLink href={receivePaymentHref} variant="success">
+                <Wallet /> รับชำระเงิน
+              </ButtonLink>
             )}
+          </>
+        }
+      />
 
-            {!isCancelled && <FormPdfActions invoiceId={invoice.id} />}
-          </div>
-        </div>
+      {isCancelled && (
+        <Alert tone="danger" className="mb-6">
+          Invoice นี้ถูกยกเลิกแล้ว ไม่สามารถพิมพ์หรือรับชำระเงินได้
+        </Alert>
+      )}
 
-        {isCancelled && (
-          <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            Invoice นี้ถูกยกเลิกแล้ว ไม่สามารถพิมพ์หรือรับชำระเงินได้
-          </div>
-        )}
-
+      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-3">
         {/* ================================== */}
-        {/* Invoice Information */}
+        {/* Main column */}
         {/* ================================== */}
 
-        <div className="mb-6 grid gap-6 lg:grid-cols-2">
+        <div className="min-w-0 space-y-6 xl:col-span-2">
           {/* Document */}
+          <Card>
+            <CardHeader title="ข้อมูลเอกสาร" />
 
-          <div className="rounded-xl border border-slate-200 bg-white p-6">
-            <h2 className="mb-4 text-lg font-bold text-slate-800">ข้อมูลเอกสาร</h2>
+            <CardBody className="grid grid-cols-1 gap-x-8 py-2 sm:grid-cols-2">
+              <DetailList
+                className="min-w-0"
+                items={[
+                  { label: "Invoice No.", value: invoice.invoiceNumber },
+                  { label: "ประเภทเอกสาร", value: documentTypeLabel(invoice.documentType) },
+                  {
+                    label: "Purchase Order",
+                    value: (
+                      <Link
+                        href={`/purchase-orders/${invoice.purchaseOrder.id}`}
+                        className="text-slate-900 hover:text-brand-700 hover:underline"
+                      >
+                        {invoice.purchaseOrder.poNumber}
+                      </Link>
+                    ),
+                  },
+                ]}
+              />
 
-            <div className="space-y-3 text-sm">
-              <div className="flex justify-between gap-4">
-                <span className="text-slate-500">Invoice No.</span>
+              <DetailList
+                className="min-w-0 border-t border-slate-100 sm:border-t-0"
+                items={[
+                  { label: "วันที่ Invoice", value: formatDate(invoice.invoiceDate) },
+                  { label: "วันครบกำหนด", value: formatDate(invoice.dueDate) },
+                  { label: "Payment Term", value: invoice.paymentTerm || "-" },
+                  { label: "Sale Order No.", value: invoice.saleOrderNumber || "-" },
+                ]}
+              />
+            </CardBody>
+          </Card>
 
-                <span className="font-semibold text-slate-800">{invoice.invoiceNumber}</span>
-              </div>
+          {/* Items */}
+          <Card>
+            <CardHeader title="รายการสินค้า" description={`${invoice.items.length} รายการ`} />
 
-              <div className="flex justify-between gap-4">
-                <span className="text-slate-500">ประเภทเอกสาร</span>
-
-                <span className="text-right text-slate-800">{documentTypeLabel(invoice.documentType)}</span>
-              </div>
-
-              <div className="flex justify-between gap-4">
-                <span className="text-slate-500">วันที่ Invoice</span>
-
-                <span className="text-slate-800">{formatDate(invoice.invoiceDate)}</span>
-              </div>
-
-              <div className="flex justify-between gap-4">
-                <span className="text-slate-500">วันครบกำหนด</span>
-
-                <span className="text-slate-800">{formatDate(invoice.dueDate)}</span>
-              </div>
-
-              <div className="flex justify-between gap-4">
-                <span className="text-slate-500">Payment Term</span>
-
-                <span className="text-slate-800">{invoice.paymentTerm || "-"}</span>
-              </div>
-
-              <div className="flex justify-between gap-4">
-                <span className="text-slate-500">Sale Order No.</span>
-
-                <span className="text-slate-800">{invoice.saleOrderNumber || "-"}</span>
-              </div>
-
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-slate-500">สถานะ</span>
-
-                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${invoiceStatusClass(invoice.status)}`}>
-                  {invoiceStatusLabel(invoice.status)}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-slate-500">สถานะวางบิล</span>
-
-                <span
-                  className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                    isBilled ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-700"
-                  }`}
-                >
-                  {isBilled ? "วางบิลแล้ว" : "ยังไม่วางบิล"}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-slate-500">สถานะรับเงิน</span>
-
-                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${paymentStateClass}`}>
-                  {paymentStateLabel}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Customer */}
-
-          <div className="rounded-xl border border-slate-200 bg-white p-6">
-            <h2 className="mb-4 text-lg font-bold text-slate-800">ข้อมูลลูกค้า</h2>
-
-            <div className="space-y-3 text-sm">
-              <div>
-                <p className="text-slate-500">รหัสลูกค้า</p>
-
-                <p className="font-semibold text-slate-800">{invoice.customerCodeSnapshot || "-"}</p>
-              </div>
-
-              <div>
-                <p className="text-slate-500">ชื่อลูกค้า</p>
-
-                <p className="font-semibold text-slate-800">{invoice.customerNameSnapshot}</p>
-              </div>
-
-              <div>
-                <p className="text-slate-500">ที่อยู่</p>
-
-                <p className="whitespace-pre-wrap text-slate-800">{invoice.customerAddressSnapshot || "-"}</p>
-              </div>
-
-              <div>
-                <p className="text-slate-500">เลขประจำตัวผู้เสียภาษี</p>
-
-                <p className="text-slate-800">{invoice.customerTaxIdSnapshot || "-"}</p>
-              </div>
-
-              <div>
-                <p className="text-slate-500">สถานที่จัดส่ง</p>
-
-                <p className="whitespace-pre-wrap text-slate-800">{invoice.shipToSnapshot || "-"}</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Purchase Order Info */}
-
-          <div className="rounded-xl border border-slate-200 bg-white p-6 lg:col-span-2">
-            <h2 className="mb-4 text-lg font-bold text-slate-800">
-              ข้อมูลผู้ติดต่อและเงื่อนไข (จาก PO {invoice.purchaseOrder.poNumber})
-            </h2>
-
-            <div className="grid gap-4 text-sm md:grid-cols-2">
-              <div>
-                <p className="text-slate-500">โทรศัพท์ผู้ติดต่อ</p>
-
-                <p className="text-slate-800">{invoice.purchaseOrder.contactPhone || "-"}</p>
-              </div>
-
-              <div>
-                <p className="text-slate-500">มือถือผู้ติดต่อ</p>
-
-                <p className="text-slate-800">{invoice.purchaseOrder.contactMobile || "-"}</p>
-              </div>
-
-              <div>
-                <p className="text-slate-500">สถานที่วางบิล</p>
-
-                <p className="whitespace-pre-wrap text-slate-800">{invoice.purchaseOrder.billPlacement || "-"}</p>
-              </div>
-
-              <div>
-                <p className="text-slate-500">เงื่อนไขการรับสินค้า / ตรวจรับ</p>
-
-                <p className="whitespace-pre-wrap text-slate-800">
-                  {invoice.purchaseOrder.acceptanceCondition || "-"}
-                </p>
-              </div>
-
-              <div className="md:col-span-2">
-                <p className="text-slate-500">หมายเหตุ</p>
-
-                <p className="whitespace-pre-wrap text-slate-800">{invoice.purchaseOrder.note || "-"}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* ================================== */}
-        {/* Items */}
-        {/* ================================== */}
-
-        <div className="mb-6 overflow-hidden rounded-xl border border-slate-200 bg-white">
-          <div className="border-b border-slate-200 px-6 py-4">
-            <h2 className="text-lg font-bold text-slate-800">รายการสินค้า</h2>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-50">
-                <tr className="border-b border-slate-200">
-                  <th className="px-4 py-3 text-center font-semibold text-slate-700">#</th>
-                  <th className="px-4 py-3 text-left font-semibold text-slate-700">รายละเอียด</th>
-                  <th className="px-4 py-3 text-right font-semibold text-slate-700">จำนวน</th>
-                  <th className="px-4 py-3 text-left font-semibold text-slate-700">หน่วย</th>
-                  <th className="px-4 py-3 text-right font-semibold text-slate-700">ราคาต่อหน่วย</th>
-                  <th className="px-4 py-3 text-right font-semibold text-slate-700">ส่วนลด</th>
-                  <th className="px-4 py-3 text-right font-semibold text-slate-700">จำนวนเงิน</th>
+            {/* Slightly tighter cells: the table shares the row with the side column on desktop */}
+            <Table className="[&_td]:px-3 [&_th]:px-3">
+              <thead>
+                <tr>
+                  <Th align="center">#</Th>
+                  <Th>รายละเอียด</Th>
+                  <Th align="right">จำนวน</Th>
+                  <Th>หน่วย</Th>
+                  <Th align="right">ราคาต่อหน่วย</Th>
+                  <Th align="right">ส่วนลด</Th>
+                  <Th align="right">จำนวนเงิน</Th>
                 </tr>
               </thead>
 
               <tbody>
                 {invoice.items.map((item) => (
-                  <tr key={item.id} className="border-b border-slate-100">
-                    <td className="px-4 py-3 text-center text-slate-600">{item.itemNo}</td>
+                  <Tr key={item.id}>
+                    <Td align="center" className="text-slate-500">
+                      {item.itemNo}
+                    </Td>
 
-                    <td className="whitespace-pre-line px-4 py-3 text-slate-800">{item.description}</td>
+                    <Td className="min-w-48 whitespace-pre-line text-slate-900">{item.description}</Td>
 
-                    <td className="px-4 py-3 text-right text-slate-700">{formatQuantity(item.quantity)}</td>
+                    <Td align="right" className="tabular-nums">
+                      {formatQuantity(item.quantity)}
+                    </Td>
 
-                    <td className="px-4 py-3 text-slate-700">{item.unit || "-"}</td>
+                    <Td>{item.unit || "-"}</Td>
 
-                    <td className="px-4 py-3 text-right text-slate-700">{formatMoney(item.unitPrice)}</td>
+                    <Td align="right" className="tabular-nums">
+                      {formatMoney(item.unitPrice)}
+                    </Td>
 
-                    <td className="px-4 py-3 text-right text-slate-700">
+                    <Td align="right" className="tabular-nums">
                       {formatLineDiscount(item.discount, item.discountType) || "-"}
-                    </td>
+                    </Td>
 
-                    <td className="px-4 py-3 text-right font-medium text-slate-800">{formatMoney(item.amount)}</td>
-                  </tr>
+                    <Td align="right" className="font-medium tabular-nums text-slate-900">
+                      {formatMoney(item.amount)}
+                    </Td>
+                  </Tr>
                 ))}
               </tbody>
-            </table>
-          </div>
+            </Table>
+          </Card>
+
+          {/* Purchase Order contact and conditions */}
+          <Card>
+            <CardHeader
+              title="ข้อมูลผู้ติดต่อและเงื่อนไข"
+              description={`จาก Purchase Order ${invoice.purchaseOrder.poNumber}`}
+            />
+
+            <CardBody className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+              <div className="min-w-0">
+                <DetailBlock label="โทรศัพท์ผู้ติดต่อ">{invoice.purchaseOrder.contactPhone}</DetailBlock>
+              </div>
+
+              <div className="min-w-0">
+                <DetailBlock label="มือถือผู้ติดต่อ">{invoice.purchaseOrder.contactMobile}</DetailBlock>
+              </div>
+
+              <div className="min-w-0">
+                <DetailBlock label="สถานที่วางบิล">{invoice.purchaseOrder.billPlacement}</DetailBlock>
+              </div>
+
+              <div className="min-w-0">
+                <DetailBlock label="เงื่อนไขการรับสินค้า / ตรวจรับ">
+                  {invoice.purchaseOrder.acceptanceCondition}
+                </DetailBlock>
+              </div>
+
+              <div className="min-w-0 sm:col-span-2">
+                <DetailBlock label="หมายเหตุ">{invoice.purchaseOrder.note}</DetailBlock>
+              </div>
+            </CardBody>
+          </Card>
         </div>
 
         {/* ================================== */}
-        {/* Invoice Summary */}
+        {/* Side column */}
         {/* ================================== */}
 
-        <div className="mb-6 flex justify-end">
-          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6">
-            <div className="flex justify-between py-2 text-sm">
-              <span className="text-slate-500">Subtotal</span>
+        <div className="min-w-0 space-y-6">
+          {/* Totals and payment summary */}
+          <Card>
+            <CardHeader title="สรุปยอด" />
 
-              <span className="font-medium text-slate-800">{formatMoney(invoice.subtotal)} บาท</span>
-            </div>
+            <CardBody className="space-y-5">
+              <dl className="space-y-2 text-sm">
+                <div className="flex justify-between gap-4">
+                  <dt className="text-slate-500">Subtotal</dt>
+                  <dd className="tabular-nums text-slate-900">{formatMoney(invoice.subtotal)} บาท</dd>
+                </div>
 
-            <div className="flex justify-between py-2 text-sm">
-              <span className="text-slate-500">VAT</span>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-slate-500">VAT</dt>
+                  <dd className="tabular-nums text-slate-900">{formatMoney(invoice.vat)} บาท</dd>
+                </div>
 
-              <span className="font-medium text-slate-800">{formatMoney(invoice.vat)} บาท</span>
-            </div>
+                <div className="flex items-baseline justify-between gap-4 border-t border-slate-200 pt-3">
+                  <dt className="font-semibold text-slate-900">ยอดรวมทั้งสิ้น</dt>
+                  <dd className="text-lg font-semibold tabular-nums text-slate-900">
+                    {formatMoney(invoice.grandTotal)} บาท
+                  </dd>
+                </div>
+              </dl>
 
-            <div className="my-2 border-t border-slate-200" />
+              <div className="space-y-3 rounded-lg border border-slate-200 p-4">
+                <div className="flex items-baseline justify-between gap-4 text-sm">
+                  <span className="text-slate-500">รับแล้ว</span>
+                  <span className="font-medium tabular-nums text-emerald-700">{formatMoney(totalPaid)} บาท</span>
+                </div>
 
-            <div className="flex justify-between py-2">
-              <span className="font-bold text-slate-800">ยอดรวมทั้งสิ้น</span>
+                <div>
+                  <div
+                    role="progressbar"
+                    aria-label="สัดส่วนที่รับชำระแล้ว"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={paidPercent}
+                    className="h-2 overflow-hidden rounded-full bg-slate-100"
+                  >
+                    <div className="h-full rounded-full bg-emerald-500" style={{ width: `${paidPercent}%` }} />
+                  </div>
+                  <p className="mt-1 text-right text-xs text-slate-500">ชำระแล้ว {paidPercent}%</p>
+                </div>
 
-              <span className="text-xl font-bold text-slate-800">{formatMoney(invoice.grandTotal)} บาท</span>
-            </div>
-          </div>
-        </div>
-
-        {/* ================================== */}
-        {/* Payment Summary */}
-        {/* ================================== */}
-
-        <div className="mb-6 grid gap-4 md:grid-cols-3">
-          <div className="rounded-xl border border-slate-200 bg-white p-5">
-            <p className="text-sm text-slate-500">ยอด Invoice</p>
-
-            <p className="mt-2 text-2xl font-bold text-slate-800">{formatMoney(invoice.grandTotal)} บาท</p>
-          </div>
-
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5">
-            <p className="text-sm text-emerald-700">ชำระแล้ว</p>
-
-            <p className="mt-2 text-2xl font-bold text-emerald-700">{formatMoney(totalPaid)} บาท</p>
-          </div>
-
-          <div
-            className={`rounded-xl border p-5 ${
-              remainingAmount > 0 ? "border-red-200 bg-red-50" : "border-emerald-200 bg-emerald-50"
-            }`}
-          >
-            <p className={`text-sm ${remainingAmount > 0 ? "text-red-700" : "text-emerald-700"}`}>คงเหลือ</p>
-
-            <p className={`mt-2 text-2xl font-bold ${remainingAmount > 0 ? "text-red-700" : "text-emerald-700"}`}>
-              {formatMoney(remainingAmount)} บาท
-            </p>
-          </div>
-        </div>
-
-        {/* ================================== */}
-        {/* Payment History */}
-        {/* ================================== */}
-
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-          <div className="flex flex-col justify-between gap-3 border-b border-slate-200 px-6 py-4 md:flex-row md:items-center">
-            <div>
-              <h2 className="text-lg font-bold text-slate-800">ประวัติการรับชำระเงิน</h2>
-
-              <p className="mt-1 text-sm text-slate-500">รับชำระแล้ว {invoice.payments.length} รายการ</p>
-            </div>
-
-            {canReceivePayment && (
-              <Link
-                href={`/payments/new?invoiceId=${invoice.id}`}
-                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
-              >
-                + รับชำระเงิน
-              </Link>
-            )}
-          </div>
-
-          {invoice.payments.length === 0 ? (
-            <div className="px-6 py-12 text-center">
-              <p className="text-slate-500">Invoice นี้ยังไม่มีประวัติการรับชำระเงิน</p>
-
-              {canReceivePayment && (
-                <Link
-                  href={`/payments/new?invoiceId=${invoice.id}`}
-                  className="mt-4 inline-block text-sm font-semibold text-emerald-600 hover:underline"
+                <div
+                  className={cn(
+                    "rounded-lg px-4 py-3",
+                    remainingAmount > 0 ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"
+                  )}
                 >
-                  บันทึกการรับชำระเงิน
-                </Link>
-              )}
+                  <p className="text-sm font-medium">คงเหลือ</p>
+                  <p className="text-2xl font-semibold tabular-nums">
+                    {formatMoney(remainingAmount)} <span className="text-base font-medium">บาท</span>
+                  </p>
+                </div>
+              </div>
+            </CardBody>
+          </Card>
 
-              {invoice.status === "DRAFT" && (
-                <p className="mt-2 text-sm text-slate-400">ต้องออก Invoice ก่อนจึงจะรับชำระเงินได้</p>
-              )}
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead className="bg-slate-50">
-                  <tr className="border-b border-slate-200">
-                    <th className="px-4 py-3 text-center font-semibold text-slate-700">#</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">วันที่รับเงิน</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">วิธีชำระเงิน</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">เลขที่อ้างอิง</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">ผู้รับเงิน</th>
-                    <th className="px-4 py-3 text-right font-semibold text-slate-700">จำนวนเงิน</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">หมายเหตุ</th>
-                  </tr>
-                </thead>
+          {/* PDF / print to form */}
+          {!isCancelled && <FormPdfActions invoiceId={invoice.id} />}
 
-                <tbody>
+          {/* Customer */}
+          <Card>
+            <CardHeader title="ข้อมูลลูกค้า" />
+
+            <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-1">
+              <div className="min-w-0">
+                <DetailBlock label="รหัสลูกค้า">{invoice.customerCodeSnapshot}</DetailBlock>
+              </div>
+
+              <div className="min-w-0">
+                <DetailBlock label="ชื่อลูกค้า">
+                  <span className="font-medium">{invoice.customerNameSnapshot}</span>
+                </DetailBlock>
+              </div>
+
+              <div className="min-w-0">
+                <DetailBlock label="ที่อยู่">{invoice.customerAddressSnapshot}</DetailBlock>
+              </div>
+
+              <div className="min-w-0">
+                <DetailBlock label="เลขประจำตัวผู้เสียภาษี">{invoice.customerTaxIdSnapshot}</DetailBlock>
+              </div>
+
+              <div className="min-w-0 sm:col-span-2 xl:col-span-1">
+                <DetailBlock label="สถานที่จัดส่ง">{invoice.shipToSnapshot}</DetailBlock>
+              </div>
+            </CardBody>
+          </Card>
+
+          {/* Payment history */}
+          <Card>
+            <CardHeader
+              title="ประวัติการรับชำระเงิน"
+              description={`รับชำระแล้ว ${invoice.payments.length} รายการ`}
+              actions={
+                canReceivePayment && (
+                  <ButtonLink href={receivePaymentHref} variant="outline" size="sm">
+                    <Plus /> รับชำระเงิน
+                  </ButtonLink>
+                )
+              }
+            />
+
+            {invoice.payments.length === 0 ? (
+              <EmptyState
+                icon={Receipt}
+                title="Invoice นี้ยังไม่มีประวัติการรับชำระเงิน"
+                description={
+                  invoice.status === "DRAFT" ? "ต้องออก Invoice ก่อนจึงจะรับชำระเงินได้" : undefined
+                }
+                action={
+                  canReceivePayment && (
+                    <ButtonLink href={receivePaymentHref} variant="ghost" size="sm" className="text-emerald-700">
+                      บันทึกการรับชำระเงิน
+                    </ButtonLink>
+                  )
+                }
+                className="py-8"
+              />
+            ) : (
+              <>
+                <ol className="divide-y divide-slate-100">
                   {invoice.payments.map((payment, index) => (
-                    <tr key={payment.id} className="border-b border-slate-100 hover:bg-slate-50">
-                      <td className="px-4 py-3 text-center text-slate-500">{index + 1}</td>
+                    <li key={payment.id} className="px-5 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-slate-900">
+                            <span className="mr-1.5 text-slate-400">#{index + 1}</span>
+                            {formatDate(payment.paymentDate)}
+                          </p>
+                          <p className="text-xs text-slate-500">{paymentMethodLabel(payment.paymentMethod)}</p>
+                        </div>
 
-                      <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatDate(payment.paymentDate)}</td>
+                        <span className="shrink-0 text-sm font-semibold tabular-nums text-emerald-700">
+                          {formatMoney(payment.amount)} บาท
+                        </span>
+                      </div>
 
-                      <td className="px-4 py-3 text-slate-700">{paymentMethodLabel(payment.paymentMethod)}</td>
-
-                      <td className="px-4 py-3 text-slate-700">{payment.referenceNumber || "-"}</td>
-
-                      <td className="px-4 py-3 text-slate-700">{payment.receivedBy || "-"}</td>
-
-                      <td className="whitespace-nowrap px-4 py-3 text-right font-semibold text-emerald-600">
-                        {formatMoney(payment.amount)} บาท
-                      </td>
-
-                      <td className="px-4 py-3 text-slate-600">{payment.note || "-"}</td>
-                    </tr>
+                      {(payment.referenceNumber || payment.receivedBy || payment.note) && (
+                        <dl className="mt-1.5 space-y-0.5 text-xs">
+                          {payment.referenceNumber && (
+                            <div className="flex gap-1.5">
+                              <dt className="shrink-0 text-slate-500">เลขที่อ้างอิง</dt>
+                              <dd className="min-w-0 break-words text-slate-700">{payment.referenceNumber}</dd>
+                            </div>
+                          )}
+                          {payment.receivedBy && (
+                            <div className="flex gap-1.5">
+                              <dt className="shrink-0 text-slate-500">ผู้รับเงิน</dt>
+                              <dd className="min-w-0 break-words text-slate-700">{payment.receivedBy}</dd>
+                            </div>
+                          )}
+                          {payment.note && (
+                            <div className="flex gap-1.5">
+                              <dt className="shrink-0 text-slate-500">หมายเหตุ</dt>
+                              <dd className="min-w-0 whitespace-pre-line break-words text-slate-700">
+                                {payment.note}
+                              </dd>
+                            </div>
+                          )}
+                        </dl>
+                      )}
+                    </li>
                   ))}
-                </tbody>
+                </ol>
 
-                <tfoot className="bg-slate-50">
-                  <tr>
-                    <td colSpan={5} className="px-4 py-4 text-right font-bold text-slate-700">
-                      รวมรับชำระ
-                    </td>
-
-                    <td className="px-4 py-4 text-right text-lg font-bold text-emerald-600">
-                      {formatMoney(totalPaid)} บาท
-                    </td>
-
-                    <td />
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          )}
+                <div className="flex items-baseline justify-between gap-4 rounded-b-xl border-t border-slate-200 bg-slate-50/60 px-5 py-3">
+                  <span className="text-sm font-semibold text-slate-700">รวมรับชำระ</span>
+                  <span className="font-semibold tabular-nums text-emerald-700">{formatMoney(totalPaid)} บาท</span>
+                </div>
+              </>
+            )}
+          </Card>
         </div>
       </div>
-    </main>
+    </>
   );
 }

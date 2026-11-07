@@ -5,7 +5,14 @@
  * use the same calculation as POST /api/invoices for its preview.
  */
 import { calcLine, calcTotals, toNumber, type Numeric, type Totals } from "@/lib/money";
-import { formatMoney, formatPercent, yearMonthInThailand } from "@/lib/format";
+import { formatMoney, formatPercent, toDateInputValue, todayInputValue, yearMonthInThailand } from "@/lib/format";
+import { OPEN_INVOICE_STATUSES } from "@/lib/labels";
+
+/** An issued, not fully paid invoice whose due date (Thai time) is before today. */
+export function isInvoiceOverdue(status: string, dueDate: Date | string | null | undefined): boolean {
+  if (!dueDate || !(OPEN_INVOICE_STATUSES as string[]).includes(status)) return false;
+  return toDateInputValue(dueDate) < todayInputValue();
+}
 
 /** Item rows available in templates/invoice-template.xlsx (rows 18-39). */
 export const INVOICE_EXCEL_MAX_ITEMS = 22;

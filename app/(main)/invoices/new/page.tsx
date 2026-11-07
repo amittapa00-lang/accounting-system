@@ -1,6 +1,10 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ArrowRight } from "lucide-react";
 
+import { ButtonLink } from "@/components/ui/button";
+import { Card, CardBody } from "@/components/ui/card";
+import { Alert } from "@/components/ui/feedback";
+import { PageHeader } from "@/components/ui/page-header";
 import { requirePageSession } from "@/lib/auth";
 import { toNumber } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
@@ -21,29 +25,37 @@ function Notice({
   message,
   href,
   linkLabel,
+  tone = "warning",
+  back = { href: "/purchase-orders", label: "Purchase Order" },
+  forward = false,
 }: {
   title: string;
   message: React.ReactNode;
   href: string;
   linkLabel: string;
+  tone?: "info" | "warning" | "danger";
+  back?: { href: string; label: string };
+  /** the link goes on to another document (arrow icon), rather than back */
+  forward?: boolean;
 }) {
   return (
-    <main className="min-h-screen bg-slate-100 p-6">
-      <div className="mx-auto max-w-4xl">
-        <div className="rounded-xl bg-white p-8 text-center shadow-sm">
-          <h1 className="text-xl font-bold text-slate-800">{title}</h1>
+    <>
+      <PageHeader title="สร้าง Invoice" back={back} />
 
-          <p className="mt-2 text-sm text-slate-500">{message}</p>
+      <Card className="max-w-2xl">
+        <CardBody className="space-y-4">
+          <Alert tone={tone} title={title}>
+            {message}
+          </Alert>
 
-          <Link
-            href={href}
-            className="mt-6 inline-flex rounded-lg bg-slate-800 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
-          >
-            {linkLabel}
-          </Link>
-        </div>
-      </div>
-    </main>
+          <div className="flex justify-end">
+            <ButtonLink href={href} variant="primary">
+              {linkLabel} {forward && <ArrowRight />}
+            </ButtonLink>
+          </div>
+        </CardBody>
+      </Card>
+    </>
   );
 }
 
@@ -88,6 +100,7 @@ export default async function NewInvoicePage({ searchParams }: Props) {
   }
 
   const poHref = `/purchase-orders/${purchaseOrder.id}`;
+  const poBack = { href: poHref, label: `PO ${purchaseOrder.poNumber}` };
   const activeInvoice = purchaseOrder.invoices[0];
 
   if (activeInvoice) {
@@ -102,6 +115,9 @@ export default async function NewInvoicePage({ searchParams }: Props) {
         }
         href={`/invoices/${activeInvoice.id}`}
         linkLabel={`ดู Invoice ${activeInvoice.invoiceNumber}`}
+        tone="info"
+        back={poBack}
+        forward
       />
     );
   }
@@ -113,6 +129,8 @@ export default async function NewInvoicePage({ searchParams }: Props) {
         message={`ไม่สามารถสร้าง Invoice จาก Purchase Order ${purchaseOrder.poNumber} ที่ถูกยกเลิกได้`}
         href={poHref}
         linkLabel="กลับ Purchase Order"
+        tone="danger"
+        back={poBack}
       />
     );
   }
@@ -124,6 +142,7 @@ export default async function NewInvoicePage({ searchParams }: Props) {
         message="กรุณาเพิ่มรายการสินค้าใน Purchase Order ก่อนสร้าง Invoice"
         href={poHref}
         linkLabel="กลับ Purchase Order"
+        back={poBack}
       />
     );
   }
@@ -154,16 +173,14 @@ export default async function NewInvoicePage({ searchParams }: Props) {
   };
 
   return (
-    <main className="min-h-screen bg-slate-100 p-6">
-      <div className="mx-auto max-w-7xl">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-800">สร้าง Invoice</h1>
+    <>
+      <PageHeader
+        title="สร้าง Invoice"
+        description={`สร้าง Invoice จาก Purchase Order ${purchaseOrder.poNumber}`}
+        back={poBack}
+      />
 
-          <p className="mt-1 text-sm text-slate-500">สร้าง Invoice จาก Purchase Order {purchaseOrder.poNumber}</p>
-        </div>
-
-        <InvoiceForm initialData={initialData} />
-      </div>
-    </main>
+      <InvoiceForm initialData={initialData} />
+    </>
   );
 }

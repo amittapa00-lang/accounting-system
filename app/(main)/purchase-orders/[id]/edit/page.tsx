@@ -7,6 +7,8 @@ import { prisma } from "@/lib/prisma";
 import { ACTIVE_INVOICE_WHERE, getPoLock } from "@/lib/purchase-orders";
 
 import PurchaseOrderForm, { type PurchaseOrderInitialData } from "@/components/purchase-orders/PurchaseOrderForm";
+import { PoStatusBadge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/ui/page-header";
 
 export const instant = false;
 
@@ -95,16 +97,15 @@ export default async function EditPurchaseOrderPage({ params }: Props) {
   };
 
   return (
-    <main className="p-6">
-      <div className="mx-auto max-w-7xl">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-800">แก้ไข Purchase Order</h1>
+    <>
+      <PageHeader
+        back={{ href: `/purchase-orders/${purchaseOrder.id}`, label: "กลับรายละเอียด PO" }}
+        title="แก้ไข Purchase Order"
+        description={`PO No. ${purchaseOrder.poNumber} · แก้ไขข้อมูล PO และรายการสินค้า`}
+        meta={<PoStatusBadge status={purchaseOrder.status} />}
+      />
 
-          <p className="mt-1 text-sm text-slate-500">แก้ไขข้อมูล PO และรายการสินค้า</p>
-        </div>
-
-        <PurchaseOrderForm customers={customers} initialData={initialData} lock={lock} />
-      </div>
-    </main>
+      <PurchaseOrderForm customers={customers} initialData={initialData} lock={lock} />
+    </>
   );
 }

@@ -7,17 +7,35 @@
  */
 :root {
   color-scheme: light;
-  --background: #ffffff;
+  --background: #f8fafc;
   --foreground: #0f172a;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+
+  /* IBM Plex Sans Thai, loaded with next/font in app/layout.tsx */
+  --font-sans: var(--font-plex-thai), "Leelawadee UI", Tahoma, ui-sans-serif, system-ui, sans-serif;
+
+  /* Brand: the crimson of the company's printed forms (M-T82-01) */
+  --color-brand-50: #fdf2f4;
+  --color-brand-100: #fce7eb;
+  --color-brand-200: #f9cfd8;
+  --color-brand-500: #e11d48;
+  --color-brand-600: #ce1043;
+  --color-brand-700: #ab0d38;
+  --color-brand-800: #8c0f31;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, "Leelawadee UI", Tahoma, sans-serif;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Thai text needs a little more line height than Latin to fit vowels and tone marks */
+body {
+  line-height: 1.6;
 }

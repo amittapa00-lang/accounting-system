@@ -1,9 +1,16 @@
 "use client";
 
 import { FormEvent, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Save } from "lucide-react";
 
-import { todayInputValue } from "@/lib/format";
+import { Button } from "@/components/ui/button";
+import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { DetailBlock } from "@/components/ui/data-display";
+import { Alert } from "@/components/ui/feedback";
+import { Field, Input, Select, Textarea } from "@/components/ui/form";
+import { formatMoney, todayInputValue } from "@/lib/format";
 import { PO_STATUSES } from "@/lib/labels";
 import { calcTotals, MoneyInputError } from "@/lib/money";
 import { cleanPoItems, previewPoLine, type PoLock } from "@/lib/purchase-orders";
@@ -78,31 +85,26 @@ function emptyHeader(): Header {
   };
 }
 
-const inputClass =
-  "w-full rounded-lg border border-gray-300 bg-white px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-gray-100 disabled:text-gray-600";
-
-function Field({ id, label, hint, children }: { id: string; label: string; hint?: string; children: ReactNode }) {
+/** A titled card of fields. Fields switch to more columns when the card is wide enough (container query). */
+function Section({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
   return (
-    <div>
-      <label htmlFor={id} className="mb-2 block text-sm font-medium text-gray-700">
-        {label}
-      </label>
-
-      {children}
-
-      {hint && <p className="mt-1 text-xs text-gray-400">{hint}</p>}
-    </div>
+    <Card>
+      <CardHeader title={title} description={description} />
+      <CardBody className="@container">{children}</CardBody>
+    </Card>
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+/** Small divider title for a second group of fields inside a Section. */
+function SubHeading({ children }: { children: ReactNode }) {
   return (
-    <section>
-      <h3 className="mb-5 border-b pb-3 text-lg font-bold text-gray-800">{title}</h3>
+    <p className="mb-4 mt-6 border-t border-slate-100 pt-5 text-xs font-semibold tracking-wide text-slate-500">
       {children}
-    </section>
+    </p>
   );
 }
+
+const fieldGrid = "grid grid-cols-1 gap-4 @md:grid-cols-2";
 
 export default function PurchaseOrderForm({ customers, initialData, lock = null }: PurchaseOrderFormProps) {
   const router = useRouter();
@@ -264,309 +266,290 @@ export default function PurchaseOrderForm({ customers, initialData, lock = null 
   }
 
   return (
-    <div className="rounded-xl bg-white p-8 shadow-sm">
-      <div className="mb-8">
-        <h2 className="text-2xl font-bold text-gray-900">
-          {isEditMode ? "แก้ไข Purchase Order" : "สร้าง Purchase Order"}
-        </h2>
+    <form onSubmit={handleSubmit} className="space-y-6">
+      {lock && <Alert tone="warning">{lock.message}</Alert>}
 
-        <p className="mt-1 text-sm text-gray-500">
-          {isEditMode ? "แก้ไขข้อมูล PO และรายการสินค้า" : "กรอกข้อมูลใบสั่งซื้อและรายการสินค้า"}
-        </p>
-      </div>
-
-      {lock && (
-        <div className="mb-8 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          {lock.message}
-        </div>
-      )}
-
-      <form onSubmit={handleSubmit} className="space-y-8">
-        <Section title="ข้อมูลหลัก">
-          <div className="grid gap-5 md:grid-cols-2">
-            <Field id="poNumber" label="PO No. *" hint="เลขที่ PO ห้ามซ้ำ">
-              <input
-                id="poNumber"
-                type="text"
-                value={header.poNumber}
-                onChange={(event) => setField("poNumber", event.target.value)}
-                placeholder="เช่น PO-2026-001"
-                required
-                disabled={identityLocked}
-                className={inputClass}
-              />
-            </Field>
-
-            <Field id="poDate" label="PO Date *">
-              <input
-                id="poDate"
-                type="date"
-                value={header.poDate}
-                onChange={(event) => setField("poDate", event.target.value)}
-                required
-                className={inputClass}
-              />
-            </Field>
-
-            {isEditMode && (
-              <Field id="status" label="สถานะ">
-                <select
-                  id="status"
-                  value={header.status}
-                  onChange={(event) => setField("status", event.target.value)}
-                  className={inputClass}
-                >
-                  {PO_STATUSES.map((status) => (
-                    <option
-                      key={status.value}
-                      value={status.value}
-                      // A PO with an invoice cannot be cancelled (cancel the invoice first)
-                      disabled={
-                        status.value === "CANCELLED" &&
-                        lock?.reason === "INVOICED" &&
-                        initialData?.header.status !== "CANCELLED"
-                      }
-                    >
-                      {status.label}
-                    </option>
-                  ))}
-                </select>
+      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-3">
+        <div className="min-w-0 space-y-6 xl:col-span-2">
+          <Section title="ข้อมูล PO" description="เลขที่ วันที่ และใบเสนอราคาที่อ้างอิง">
+            <div className={fieldGrid}>
+              <Field label="PO No." htmlFor="poNumber" required hint="เลขที่ PO ห้ามซ้ำ" className="min-w-0">
+                <Input
+                  id="poNumber"
+                  type="text"
+                  value={header.poNumber}
+                  onChange={(event) => setField("poNumber", event.target.value)}
+                  placeholder="เช่น PO-2026-001"
+                  required
+                  disabled={identityLocked}
+                />
               </Field>
-            )}
-          </div>
-        </Section>
 
-        <Section title="ข้อมูลลูกค้า">
-          <Field id="customerId" label="ลูกค้า *">
-            <select
-              id="customerId"
-              value={header.customerId}
-              onChange={(event) => handleCustomerChange(event.target.value)}
-              required
-              disabled={identityLocked}
-              className={inputClass}
-            >
-              <option value="">-- เลือกลูกค้า --</option>
+              <Field label="PO Date" htmlFor="poDate" required className="min-w-0">
+                <Input
+                  id="poDate"
+                  type="date"
+                  value={header.poDate}
+                  onChange={(event) => setField("poDate", event.target.value)}
+                  required
+                />
+              </Field>
 
-              {customers.map((customer) => (
-                <option key={customer.id} value={customer.id}>
-                  {customer.code} - {customer.name}
-                  {customer.isActive ? "" : " (ปิดใช้งาน)"}
-                </option>
-              ))}
-            </select>
-          </Field>
-
-          {selectedCustomer && (
-            <div className="mt-5 rounded-lg border border-blue-100 bg-blue-50 p-5">
-              <h4 className="font-semibold text-blue-900">ข้อมูลลูกค้า</h4>
-
-              <div className="mt-3 grid gap-3 text-sm md:grid-cols-2">
-                <p>
-                  <span className="font-medium">รหัส:</span> {selectedCustomer.code}
-                </p>
-
-                <p>
-                  <span className="font-medium">ชื่อ:</span> {selectedCustomer.name}
-                </p>
-
-                <p className="md:col-span-2">
-                  <span className="font-medium">ที่อยู่:</span> {selectedCustomer.address || "-"}
-                </p>
-
-                <p>
-                  <span className="font-medium">โทร:</span> {selectedCustomer.tel || "-"}
-                </p>
-
-                <p>
-                  <span className="font-medium">เลขผู้เสียภาษี:</span> {selectedCustomer.taxId || "-"}
-                </p>
-              </div>
+              {isEditMode && (
+                <Field label="สถานะ" htmlFor="status" className="min-w-0">
+                  <Select
+                    id="status"
+                    value={header.status}
+                    onChange={(event) => setField("status", event.target.value)}
+                  >
+                    {PO_STATUSES.map((status) => (
+                      <option
+                        key={status.value}
+                        value={status.value}
+                        // A PO with an invoice cannot be cancelled (cancel the invoice first)
+                        disabled={
+                          status.value === "CANCELLED" &&
+                          lock?.reason === "INVOICED" &&
+                          initialData?.header.status !== "CANCELLED"
+                        }
+                      >
+                        {status.label}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              )}
             </div>
-          )}
-        </Section>
 
-        <Section title="การส่งมอบ">
-          <div className="grid gap-5 md:grid-cols-2">
-            <Field id="plant" label="Plant">
-              <input
-                id="plant"
-                type="text"
-                value={header.plant}
-                onChange={(event) => setField("plant", event.target.value)}
-                placeholder="ระบุ Plant"
-                className={inputClass}
-              />
-            </Field>
+            <SubHeading>อ้างอิง Quotation</SubHeading>
 
-            <Field id="deliveryDate" label="Delivery Date">
-              <input
-                id="deliveryDate"
-                type="date"
-                value={header.deliveryDate}
-                onChange={(event) => setField("deliveryDate", event.target.value)}
-                className={inputClass}
-              />
-            </Field>
+            <div className={fieldGrid}>
+              <Field label="Quotation No." htmlFor="quotationNumber" className="min-w-0">
+                <Input
+                  id="quotationNumber"
+                  type="text"
+                  value={header.quotationNumber}
+                  onChange={(event) => setField("quotationNumber", event.target.value)}
+                  placeholder="เช่น QT-2026-001"
+                />
+              </Field>
 
-            <Field id="deliveryPlace" label="Delivery Place">
-              <input
-                id="deliveryPlace"
-                type="text"
-                value={header.deliveryPlace}
-                onChange={(event) => setField("deliveryPlace", event.target.value)}
-                placeholder="สถานที่จัดส่ง"
-                className={inputClass}
-              />
-            </Field>
+              <Field label="Quotation Date" htmlFor="quotationDate" className="min-w-0">
+                <Input
+                  id="quotationDate"
+                  type="date"
+                  value={header.quotationDate}
+                  onChange={(event) => setField("quotationDate", event.target.value)}
+                />
+              </Field>
+            </div>
+          </Section>
 
-            <Field id="billPlacement" label="Bill Placement">
-              <input
-                id="billPlacement"
-                type="text"
-                value={header.billPlacement}
-                onChange={(event) => setField("billPlacement", event.target.value)}
-                placeholder="สถานที่วางบิล"
-                className={inputClass}
-              />
-            </Field>
+          <Section title="การส่งมอบ" description="สถานที่ วันที่ส่ง และเงื่อนไขการชำระเงิน">
+            <div className={fieldGrid}>
+              <Field label="Plant" htmlFor="plant" className="min-w-0">
+                <Input
+                  id="plant"
+                  type="text"
+                  value={header.plant}
+                  onChange={(event) => setField("plant", event.target.value)}
+                  placeholder="ระบุ Plant"
+                />
+              </Field>
 
-            <div className="md:col-span-2">
-              <Field id="paymentTerm" label="Payment Term">
-                <input
+              <Field label="Delivery Date" htmlFor="deliveryDate" className="min-w-0">
+                <Input
+                  id="deliveryDate"
+                  type="date"
+                  value={header.deliveryDate}
+                  onChange={(event) => setField("deliveryDate", event.target.value)}
+                />
+              </Field>
+
+              <Field label="Delivery Place" htmlFor="deliveryPlace" className="min-w-0">
+                <Input
+                  id="deliveryPlace"
+                  type="text"
+                  value={header.deliveryPlace}
+                  onChange={(event) => setField("deliveryPlace", event.target.value)}
+                  placeholder="สถานที่จัดส่ง"
+                />
+              </Field>
+
+              <Field label="Bill Placement" htmlFor="billPlacement" className="min-w-0">
+                <Input
+                  id="billPlacement"
+                  type="text"
+                  value={header.billPlacement}
+                  onChange={(event) => setField("billPlacement", event.target.value)}
+                  placeholder="สถานที่วางบิล"
+                />
+              </Field>
+
+              <Field label="Payment Term" htmlFor="paymentTerm" className="min-w-0 @md:col-span-2">
+                <Input
                   id="paymentTerm"
                   type="text"
                   value={header.paymentTerm}
                   onChange={(event) => setField("paymentTerm", event.target.value)}
                   placeholder="เช่น เครดิต 30 วัน"
-                  className={inputClass}
+                />
+              </Field>
+            </div>
+          </Section>
+        </div>
+
+        <Section title="ลูกค้า" description="เลือกลูกค้าและผู้ติดต่อของ PO นี้">
+          <div className="space-y-4">
+            {customers.length === 0 && (
+              <Alert tone="warning">
+                ยังไม่มีลูกค้าที่ใช้งานอยู่{" "}
+                <Link href="/customers" className="font-medium underline underline-offset-2">
+                  เพิ่มลูกค้า
+                </Link>
+              </Alert>
+            )}
+
+            <Field label="ลูกค้า" htmlFor="customerId" required>
+              <Select
+                id="customerId"
+                value={header.customerId}
+                onChange={(event) => handleCustomerChange(event.target.value)}
+                required
+                disabled={identityLocked}
+              >
+                <option value="">-- เลือกลูกค้า --</option>
+
+                {customers.map((customer) => (
+                  <option key={customer.id} value={customer.id}>
+                    {customer.code} - {customer.name}
+                    {customer.isActive ? "" : " (ปิดใช้งาน)"}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+
+            {selectedCustomer && (
+              <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <div className="min-w-0">
+                  <p className="font-medium text-slate-900">{selectedCustomer.name}</p>
+                  <p className="text-xs text-slate-500">รหัส: {selectedCustomer.code}</p>
+                </div>
+
+                <DetailBlock label="ที่อยู่">{selectedCustomer.address}</DetailBlock>
+
+                <div className="grid grid-cols-1 gap-3 @xs:grid-cols-2">
+                  <div className="min-w-0">
+                    <DetailBlock label="โทร">{selectedCustomer.tel}</DetailBlock>
+                  </div>
+                  <div className="min-w-0">
+                    <DetailBlock label="เลขผู้เสียภาษี">{selectedCustomer.taxId}</DetailBlock>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <SubHeading>ผู้ติดต่อ</SubHeading>
+
+          <div className="space-y-4">
+            <Field label="Contact Name" htmlFor="contactName">
+              <Input
+                id="contactName"
+                type="text"
+                value={header.contactName}
+                onChange={(event) => setField("contactName", event.target.value)}
+              />
+            </Field>
+
+            <div className="grid grid-cols-1 gap-4 @xs:grid-cols-2">
+              <Field label="Contact Phone" htmlFor="contactPhone" className="min-w-0">
+                <Input
+                  id="contactPhone"
+                  type="text"
+                  value={header.contactPhone}
+                  onChange={(event) => setField("contactPhone", event.target.value)}
+                />
+              </Field>
+
+              <Field label="Contact Mobile" htmlFor="contactMobile" className="min-w-0">
+                <Input
+                  id="contactMobile"
+                  type="text"
+                  value={header.contactMobile}
+                  onChange={(event) => setField("contactMobile", event.target.value)}
                 />
               </Field>
             </div>
           </div>
         </Section>
+      </div>
 
-        <Section title="อ้างอิง Quotation">
-          <div className="grid gap-5 md:grid-cols-2">
-            <Field id="quotationNumber" label="Quotation No.">
-              <input
-                id="quotationNumber"
-                type="text"
-                value={header.quotationNumber}
-                onChange={(event) => setField("quotationNumber", event.target.value)}
-                placeholder="เช่น QT-2026-001"
-                className={inputClass}
-              />
-            </Field>
+      <Card>
+        <PurchaseOrderItemsTable
+          items={items}
+          readOnly={linesLocked}
+          onAdd={addItem}
+          onRemove={removeItem}
+          onChange={updateItem}
+        />
 
-            <Field id="quotationDate" label="Quotation Date">
-              <input
-                id="quotationDate"
-                type="date"
-                value={header.quotationDate}
-                onChange={(event) => setField("quotationDate", event.target.value)}
-                className={inputClass}
-              />
-            </Field>
-          </div>
-        </Section>
+        <PurchaseOrderTotals {...totals} />
+      </Card>
 
-        <Section title="ผู้ติดต่อ">
-          <div className="grid gap-5 md:grid-cols-3">
-            <Field id="contactName" label="Contact Name">
-              <input
-                id="contactName"
-                type="text"
-                value={header.contactName}
-                onChange={(event) => setField("contactName", event.target.value)}
-                className={inputClass}
-              />
-            </Field>
+      <Section title="หมายเหตุ" description="เงื่อนไขการรับมอบและข้อความเพิ่มเติม">
+        <div className="grid grid-cols-1 gap-4 @2xl:grid-cols-2">
+          <Field label="เงื่อนไขการรับมอบ / ตรวจรับ" htmlFor="acceptanceCondition" className="min-w-0">
+            <Textarea
+              id="acceptanceCondition"
+              value={header.acceptanceCondition}
+              onChange={(event) => setField("acceptanceCondition", event.target.value)}
+              rows={4}
+              placeholder="ระบุเงื่อนไขการรับมอบหรือการตรวจรับ"
+            />
+          </Field>
 
-            <Field id="contactPhone" label="Contact Phone">
-              <input
-                id="contactPhone"
-                type="text"
-                value={header.contactPhone}
-                onChange={(event) => setField("contactPhone", event.target.value)}
-                className={inputClass}
-              />
-            </Field>
-
-            <Field id="contactMobile" label="Contact Mobile">
-              <input
-                id="contactMobile"
-                type="text"
-                value={header.contactMobile}
-                onChange={(event) => setField("contactMobile", event.target.value)}
-                className={inputClass}
-              />
-            </Field>
-          </div>
-        </Section>
-
-        <section>
-          <PurchaseOrderItemsTable
-            items={items}
-            readOnly={linesLocked}
-            onAdd={addItem}
-            onRemove={removeItem}
-            onChange={updateItem}
-          />
-
-          <PurchaseOrderTotals {...totals} />
-        </section>
-
-        <Section title="เงื่อนไขการรับมอบ / ตรวจรับ">
-          <textarea
-            value={header.acceptanceCondition}
-            onChange={(event) => setField("acceptanceCondition", event.target.value)}
-            rows={4}
-            placeholder="ระบุเงื่อนไขการรับมอบหรือการตรวจรับ"
-            className={inputClass}
-          />
-        </Section>
-
-        <Section title="หมายเหตุ">
-          <textarea
-            value={header.note}
-            onChange={(event) => setField("note", event.target.value)}
-            rows={4}
-            placeholder="หมายเหตุเพิ่มเติม"
-            className={inputClass}
-          />
-        </Section>
-
-        {error && (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">{error}</div>
-        )}
-
-        {success && (
-          <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
-            {success}
-          </div>
-        )}
-
-        <div className="flex flex-col gap-3 border-t pt-6 sm:flex-row sm:justify-end">
-          <button
-            type="button"
-            onClick={() =>
-              router.push(initialData ? `/purchase-orders/${initialData.id}` : "/purchase-orders")
-            }
-            className="rounded-lg border border-gray-300 bg-white px-6 py-3 font-semibold text-gray-700 transition hover:bg-gray-50"
-          >
-            ยกเลิก
-          </button>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="rounded-lg bg-blue-600 px-6 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {loading ? "กำลังบันทึก..." : isEditMode ? "บันทึกการแก้ไข" : "บันทึก PO"}
-          </button>
+          <Field label="หมายเหตุ" htmlFor="note" className="min-w-0">
+            <Textarea
+              id="note"
+              value={header.note}
+              onChange={(event) => setField("note", event.target.value)}
+              rows={4}
+              placeholder="หมายเหตุเพิ่มเติม"
+            />
+          </Field>
         </div>
-      </form>
-    </div>
+      </Section>
+
+      {/* Action bar: stays at the bottom of the screen while scrolling through the long form */}
+      <div className="sticky bottom-4 z-20 space-y-3 rounded-xl border border-slate-200 bg-white/95 p-3 shadow-lg backdrop-blur sm:px-5 print:hidden">
+        {error && <Alert tone="danger">{error}</Alert>}
+
+        {success && <Alert tone="success">{success}</Alert>}
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-baseline justify-between gap-3 sm:block">
+            <p className="text-xs text-slate-500">ยอดรวมทั้งสิ้น</p>
+            <p className="text-lg font-semibold tabular-nums text-slate-900">฿{formatMoney(totals.grandTotal)}</p>
+          </div>
+
+          <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-2 sm:flex">
+            <Button
+              variant="outline"
+              onClick={() =>
+                router.push(initialData ? `/purchase-orders/${initialData.id}` : "/purchase-orders")
+              }
+            >
+              ยกเลิก
+            </Button>
+
+            <Button type="submit" disabled={loading}>
+              <Save />
+              {loading ? "กำลังบันทึก..." : isEditMode ? "บันทึกการแก้ไข" : "บันทึก PO"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </form>
   );
 }

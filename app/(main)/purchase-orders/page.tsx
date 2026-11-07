@@ -1,8 +1,12 @@
+import { Plus } from "lucide-react";
+
 import { requirePageSession } from "@/lib/auth";
 import { calcTotals } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 
 import PurchaseOrderList from "@/components/purchase-orders/PurchaseOrderList";
+import { ButtonLink } from "@/components/ui/button";
+import { PageHeader } from "@/components/ui/page-header";
 
 export const instant = false;
 
@@ -44,10 +48,18 @@ export default async function PurchaseOrdersPage() {
   }));
 
   return (
-    <main className="p-6">
-      <div className="mx-auto max-w-7xl">
-        <PurchaseOrderList purchaseOrders={formattedPurchaseOrders} />
-      </div>
-    </main>
+    <>
+      <PageHeader
+        title="รายการ Purchase Order"
+        description="จัดการและค้นหาใบสั่งซื้อของลูกค้า"
+        actions={
+          <ButtonLink href="/purchase-orders/new" variant="brand">
+            <Plus /> สร้าง PO ใหม่
+          </ButtonLink>
+        }
+      />
+
+      <PurchaseOrderList purchaseOrders={formattedPurchaseOrders} />
+    </>
   );
 }

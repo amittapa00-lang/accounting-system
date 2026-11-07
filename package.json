@@ -20,6 +20,7 @@
     "bcryptjs": "^3.0.3",
     "dotenv": "^18.0.9",
     "exceljs": "^4.4.0",
+    "lucide-react": "^1.70.0",
     "next": "16.4.5",
     "next-auth": "^4.24.15",
     "pdf-lib": "^1.17.1",
@@ -27,7 +28,8 @@
     "pg": "^8.23.1",
     "prisma": "^7.10.1",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "tailwind-merge": "^3.7.0"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4.3.5",

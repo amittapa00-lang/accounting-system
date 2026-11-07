@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import PaymentForm from "@/components/payments/PaymentForm";
+import { PageHeader } from "@/components/ui/page-header";
 import { requirePageSession } from "@/lib/auth";
 import { paymentSummary, round2 } from "@/lib/money";
 import { paymentBlockedReason } from "@/lib/payments";
@@ -48,33 +49,26 @@ export default async function NewPaymentPage({ searchParams }: PageProps) {
   );
 
   return (
-    <main className="min-h-screen bg-slate-100 p-6">
-      <div className="mx-auto max-w-5xl">
-        {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-800">
-            รับชำระเงิน
-          </h1>
+    <>
+      <PageHeader
+        title="รับชำระเงิน"
+        description={`บันทึกการรับชำระเงินของ Invoice ${invoice.invoiceNumber}`}
+        back={{ href: `/invoices/${invoice.id}`, label: `กลับไป Invoice ${invoice.invoiceNumber}` }}
+      />
 
-          <p className="mt-1 text-sm text-slate-500">
-            บันทึกการรับชำระเงินของ Invoice
-          </p>
-        </div>
-
-        {/* Form */}
-        <PaymentForm
-          invoice={{
-            id: invoice.id,
-            invoiceNumber: invoice.invoiceNumber,
-            customerName: invoice.customerNameSnapshot,
-            grandTotal: round2(invoice.grandTotal),
-            totalPaid: summary.paid,
-            remainingAmount: summary.remaining,
-          }}
-          blockedReason={paymentBlockedReason(invoice.status)}
-          currentUserName={session.user.name ?? session.user.username ?? ""}
-        />
-      </div>
-    </main>
+      <PaymentForm
+        invoice={{
+          id: invoice.id,
+          invoiceNumber: invoice.invoiceNumber,
+          customerName: invoice.customerNameSnapshot,
+          status: invoice.status,
+          grandTotal: round2(invoice.grandTotal),
+          totalPaid: summary.paid,
+          remainingAmount: summary.remaining,
+        }}
+        blockedReason={paymentBlockedReason(invoice.status)}
+        currentUserName={session.user.name ?? session.user.username ?? ""}
+      />
+    </>
   );
 }

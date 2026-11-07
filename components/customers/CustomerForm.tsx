@@ -1,7 +1,13 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import { Save, UserPlus } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { Card, CardBody, CardFooter, CardHeader } from "@/components/ui/card";
+import { Alert } from "@/components/ui/feedback";
+import { Field, Input, Select, Textarea } from "@/components/ui/form";
 
 /** Values offered for ประเภทสาขา (same list when creating and editing). */
 const BRANCH_TYPES = ["สำนักงานใหญ่", "สาขา"];
@@ -56,10 +62,32 @@ function toFields(customer?: CustomerFormCustomer): Fields {
   };
 }
 
-const inputClass =
-  "w-full rounded-lg border border-gray-300 bg-white px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
+/**
+ * A group of fields. Edit mode: its own card. Create mode: a titled block inside the single "เพิ่มลูกค้า" card.
+ * Fields switch to two columns when the block is wide enough (container query), so the same markup
+ * works in the narrow side card and in the wide edit page.
+ */
+function Section({ title, asCard, children }: { title: string; asCard: boolean; children: ReactNode }) {
+  const body = <div className="@container space-y-4">{children}</div>;
 
-const labelClass = "mb-2 block text-sm font-medium text-gray-700";
+  if (asCard) {
+    return (
+      <Card>
+        <CardHeader title={title} />
+        <CardBody>{body}</CardBody>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="px-5 py-5">
+      <h3 className="mb-4 text-xs font-semibold tracking-wide text-slate-500">{title}</h3>
+      {body}
+    </div>
+  );
+}
+
+const twoColumns = "grid grid-cols-1 gap-4 @sm:grid-cols-2";
 
 export default function CustomerForm({ customer }: CustomerFormProps) {
   const router = useRouter();
@@ -137,237 +165,224 @@ export default function CustomerForm({ customer }: CustomerFormProps) {
     }
   }
 
-  return (
-    <div className="@container rounded-xl bg-white p-6 shadow-sm">
-      <div className="mb-6">
-        <h2 className="text-xl font-bold text-gray-900">{isEditMode ? "ข้อมูลลูกค้า" : "เพิ่มลูกค้า"}</h2>
+  const customerSection = (
+    <Section title="ข้อมูลลูกค้า" asCard={isEditMode}>
+      <div className={twoColumns}>
+        <Field label="รหัสลูกค้า" htmlFor="code" required>
+          <Input
+            id="code"
+            type="text"
+            value={fields.code}
+            onChange={(event) => setField("code", event.target.value)}
+            placeholder="เช่น CUST-001"
+            required
+          />
+        </Field>
 
-        <p className="mt-1 text-sm text-gray-500">
-          {isEditMode ? "แก้ไขข้อมูลแล้วกดบันทึก" : "กรอกข้อมูลลูกค้า"}
-        </p>
+        <Field label="ชื่อลูกค้า" htmlFor="name" required>
+          <Input
+            id="name"
+            type="text"
+            value={fields.name}
+            onChange={(event) => setField("name", event.target.value)}
+            placeholder="ชื่อบริษัท / ชื่อลูกค้า"
+            required
+          />
+        </Field>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <div className="grid gap-5 @lg:grid-cols-2">
-          <div>
-            <label htmlFor="code" className={labelClass}>
-              รหัสลูกค้า *
-            </label>
+      <Field label="เลขประจำตัวผู้เสียภาษี" htmlFor="taxId">
+        <Input
+          id="taxId"
+          type="text"
+          value={fields.taxId}
+          onChange={(event) => setField("taxId", event.target.value)}
+          placeholder="เลขประจำตัวผู้เสียภาษี 13 หลัก"
+          className="tabular-nums"
+        />
+      </Field>
 
-            <input
-              id="code"
-              type="text"
-              value={fields.code}
-              onChange={(event) => setField("code", event.target.value)}
-              placeholder="เช่น CUST-001"
-              required
-              className={inputClass}
-            />
-          </div>
-
-          <div>
-            <label htmlFor="name" className={labelClass}>
-              ชื่อลูกค้า *
-            </label>
-
-            <input
-              id="name"
-              type="text"
-              value={fields.name}
-              onChange={(event) => setField("name", event.target.value)}
-              placeholder="ชื่อบริษัท / ชื่อลูกค้า"
-              required
-              className={inputClass}
-            />
-          </div>
-        </div>
-
-        <div>
-          <label htmlFor="address" className={labelClass}>
-            ที่อยู่
-          </label>
-
-          <textarea
-            id="address"
-            value={fields.address}
-            onChange={(event) => setField("address", event.target.value)}
-            rows={3}
-            placeholder="ที่อยู่ลูกค้า"
-            className={inputClass}
-          />
-        </div>
-
-        <div className="grid gap-5 @lg:grid-cols-2">
-          <div>
-            <label htmlFor="tel" className={labelClass}>
-              โทรศัพท์
-            </label>
-
-            <input
-              id="tel"
-              type="text"
-              value={fields.tel}
-              onChange={(event) => setField("tel", event.target.value)}
-              placeholder="02-xxx-xxxx"
-              className={inputClass}
-            />
-          </div>
-
-          <div>
-            <label htmlFor="taxId" className={labelClass}>
-              เลขประจำตัวผู้เสียภาษี
-            </label>
-
-            <input
-              id="taxId"
-              type="text"
-              value={fields.taxId}
-              onChange={(event) => setField("taxId", event.target.value)}
-              placeholder="เลขประจำตัวผู้เสียภาษี 13 หลัก"
-              className={inputClass}
-            />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label htmlFor="branchType" className={labelClass}>
-              ประเภทสาขา
-            </label>
-
-            <select
-              id="branchType"
-              value={fields.branchType}
-              onChange={(event) => setField("branchType", event.target.value)}
-              className={inputClass}
-            >
-              <option value="">เลือก</option>
-              {branchTypeOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label htmlFor="branchNumber" className={labelClass}>
-              เลขที่สาขา
-            </label>
-
-            <input
-              id="branchNumber"
-              type="text"
-              value={fields.branchNumber}
-              onChange={(event) => setField("branchNumber", event.target.value)}
-              placeholder="00000"
-              className={inputClass}
-            />
-          </div>
-        </div>
-
-        <div className="grid gap-5 @lg:grid-cols-2">
-          <div>
-            <label htmlFor="contactName" className={labelClass}>
-              ชื่อผู้ติดต่อ
-            </label>
-
-            <input
-              id="contactName"
-              type="text"
-              value={fields.contactName}
-              onChange={(event) => setField("contactName", event.target.value)}
-              placeholder="ชื่อผู้ติดต่อ"
-              className={inputClass}
-            />
-          </div>
-
-          <div>
-            <label htmlFor="email" className={labelClass}>
-              Email
-            </label>
-
-            <input
-              id="email"
-              type="email"
-              value={fields.email}
-              onChange={(event) => setField("email", event.target.value)}
-              placeholder="example@email.com"
-              className={inputClass}
-            />
-          </div>
-        </div>
-
-        <div>
-          <label htmlFor="note" className={labelClass}>
-            หมายเหตุ
-          </label>
-
-          <textarea
-            id="note"
-            value={fields.note}
-            onChange={(event) => setField("note", event.target.value)}
-            rows={3}
-            placeholder="หมายเหตุเพิ่มเติม"
-            className={inputClass}
-          />
-        </div>
-
-        {isEditMode && (
-          <div className="rounded-lg border border-gray-200 bg-gray-50 p-5">
-            <h3 className="mb-4 font-semibold text-gray-800">สถานะลูกค้า</h3>
-
-            <label className="flex cursor-pointer items-center gap-3">
-              <input
-                type="checkbox"
-                checked={fields.isActive}
-                onChange={(event) => setField("isActive", event.target.checked)}
-                className="h-5 w-5 rounded border-gray-300"
-              />
-
-              <span className="text-sm font-medium text-gray-700">ลูกค้านี้ยังใช้งานอยู่</span>
-            </label>
-          </div>
-        )}
-
-        {error && (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">{error}</div>
-        )}
-
-        {success && (
-          <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
-            {success}
-          </div>
-        )}
-
-        {isEditMode ? (
-          <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-            <button
-              type="button"
-              onClick={() => router.push("/customers")}
-              className="rounded-lg border border-gray-300 bg-white px-5 py-3 font-semibold text-gray-700 transition hover:bg-gray-50"
-            >
-              ยกเลิก
-            </button>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="rounded-lg bg-blue-600 px-6 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {loading ? "กำลังบันทึก..." : "บันทึกการแก้ไข"}
-            </button>
-          </div>
-        ) : (
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-lg bg-blue-600 px-6 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="ประเภทสาขา" htmlFor="branchType" className="min-w-0">
+          <Select
+            id="branchType"
+            value={fields.branchType}
+            onChange={(event) => setField("branchType", event.target.value)}
           >
-            {loading ? "กำลังบันทึก..." : "บันทึกลูกค้า"}
-          </button>
-        )}
-      </form>
+            <option value="">เลือก</option>
+            {branchTypeOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </Select>
+        </Field>
+
+        <Field label="เลขที่สาขา" htmlFor="branchNumber" className="min-w-0">
+          <Input
+            id="branchNumber"
+            type="text"
+            value={fields.branchNumber}
+            onChange={(event) => setField("branchNumber", event.target.value)}
+            placeholder="00000"
+            className="tabular-nums"
+          />
+        </Field>
+      </div>
+    </Section>
+  );
+
+  const contactSection = (
+    <Section title="ข้อมูลติดต่อ" asCard={isEditMode}>
+      <Field label="ชื่อผู้ติดต่อ" htmlFor="contactName">
+        <Input
+          id="contactName"
+          type="text"
+          value={fields.contactName}
+          onChange={(event) => setField("contactName", event.target.value)}
+          placeholder="ชื่อผู้ติดต่อ"
+        />
+      </Field>
+
+      <div className={twoColumns}>
+        <Field label="โทรศัพท์" htmlFor="tel">
+          <Input
+            id="tel"
+            type="text"
+            value={fields.tel}
+            onChange={(event) => setField("tel", event.target.value)}
+            placeholder="02-xxx-xxxx"
+          />
+        </Field>
+
+        <Field label="Email" htmlFor="email">
+          <Input
+            id="email"
+            type="email"
+            value={fields.email}
+            onChange={(event) => setField("email", event.target.value)}
+            placeholder="example@email.com"
+          />
+        </Field>
+      </div>
+    </Section>
+  );
+
+  const addressSection = (
+    <Section title="ที่อยู่และหมายเหตุ" asCard={isEditMode}>
+      <Field label="ที่อยู่" htmlFor="address">
+        <Textarea
+          id="address"
+          value={fields.address}
+          onChange={(event) => setField("address", event.target.value)}
+          rows={3}
+          placeholder="ที่อยู่ลูกค้า"
+        />
+      </Field>
+
+      <Field label="หมายเหตุ" htmlFor="note">
+        <Textarea
+          id="note"
+          value={fields.note}
+          onChange={(event) => setField("note", event.target.value)}
+          rows={3}
+          placeholder="หมายเหตุเพิ่มเติม"
+        />
+      </Field>
+    </Section>
+  );
+
+  // Edit mode only
+  const statusSection = (
+    <Section title="สถานะลูกค้า" asCard>
+      <label
+        htmlFor="isActive"
+        className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 p-4 transition-colors hover:bg-slate-50"
+      >
+        <input
+          id="isActive"
+          type="checkbox"
+          checked={fields.isActive}
+          onChange={(event) => setField("isActive", event.target.checked)}
+          className="mt-0.5 size-4 shrink-0 rounded border-slate-300 accent-slate-900"
+        />
+
+        <span className="min-w-0">
+          <span className="block text-sm font-medium text-slate-900">ลูกค้านี้ยังใช้งานอยู่</span>
+          <span className="mt-0.5 block text-xs text-slate-500">
+            ลูกค้าที่ปิดใช้งานจะไม่แสดงให้เลือกตอนสร้าง PO ใหม่
+          </span>
+        </span>
+      </label>
+    </Section>
+  );
+
+  const messages = (error || success) && (
+    <div className="space-y-3">
+      {error && <Alert tone="danger">{error}</Alert>}
+      {success && <Alert tone="success">{success}</Alert>}
     </div>
+  );
+
+  if (!isEditMode) {
+    // Create: one compact card that sits next to the customer list
+    return (
+      <Card>
+        <CardHeader title="เพิ่มลูกค้า" description="กรอกข้อมูลลูกค้า" />
+
+        <form onSubmit={handleSubmit}>
+          <div className="divide-y divide-slate-100">
+            {customerSection}
+            {contactSection}
+            {addressSection}
+          </div>
+
+          {messages && <div className="px-5 pb-5">{messages}</div>}
+
+          <CardFooter>
+            <Button type="submit" disabled={loading} className="w-full">
+              <UserPlus />
+              {loading ? "กำลังบันทึก..." : "บันทึกลูกค้า"}
+            </Button>
+          </CardFooter>
+        </form>
+      </Card>
+    );
+  }
+
+  // Edit: one card per group, two columns on desktop, actions in a bar that stays in view
+  return (
+    <form onSubmit={handleSubmit}>
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
+        <div className="min-w-0 space-y-6">
+          {customerSection}
+          {addressSection}
+        </div>
+
+        <div className="min-w-0 space-y-6">
+          {contactSection}
+          {statusSection}
+        </div>
+      </div>
+
+      <div className="sticky bottom-4 z-20 mt-6 space-y-3 rounded-xl border border-slate-200 bg-white/95 p-3 shadow-lg backdrop-blur sm:px-5 print:hidden">
+        {messages}
+
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <p className="hidden text-sm text-slate-500 sm:block">แก้ไขข้อมูลแล้วกดบันทึก</p>
+
+          <div className="flex flex-col-reverse gap-2 sm:flex-row">
+            <Button variant="outline" onClick={() => router.push("/customers")}>
+              ยกเลิก
+            </Button>
+
+            <Button type="submit" disabled={loading}>
+              <Save />
+              {loading ? "กำลังบันทึก..." : "บันทึกการแก้ไข"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </form>
   );
 }

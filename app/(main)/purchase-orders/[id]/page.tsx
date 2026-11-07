@@ -1,10 +1,18 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { FilePlus2, FileText, Pencil } from "lucide-react";
 
+import { InvoiceStatusBadge, PoStatusBadge } from "@/components/ui/badge";
+import { ButtonLink } from "@/components/ui/button";
+import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { DetailBlock, DetailList } from "@/components/ui/data-display";
+import { Alert, EmptyState } from "@/components/ui/feedback";
+import { PageHeader } from "@/components/ui/page-header";
+import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageSession } from "@/lib/auth";
 import { formatDate, formatMoney, formatPercent } from "@/lib/format";
 import { formatLineDiscount, formatQuantity } from "@/lib/invoices";
-import { documentTypeLabel, invoiceStatusClass, invoiceStatusLabel, poStatusClass, poStatusLabel } from "@/lib/labels";
+import { documentTypeLabel } from "@/lib/labels";
 import { calcTotals } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 
@@ -59,324 +67,251 @@ export default async function PurchaseOrderDetailPage({ params }: Props) {
   const canCreateInvoice = !activeInvoice && purchaseOrder.status !== "CANCELLED";
 
   return (
-    <main className="p-6">
-      <div className="mx-auto max-w-7xl space-y-6">
-        {/* Header */}
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <div className="mb-2">
-              <Link href="/purchase-orders" className="text-sm text-blue-600 hover:underline">
-                ← กลับรายการ PO
-              </Link>
-            </div>
-
-            <h1 className="text-2xl font-bold text-slate-800">PO No. {purchaseOrder.poNumber}</h1>
-
-            <p className="mt-1 text-sm text-slate-500">รายละเอียด Purchase Order</p>
-          </div>
-
-          <div className="flex gap-2">
-            <Link
-              href={`/purchase-orders/${purchaseOrder.id}/edit`}
-              className="rounded-lg bg-blue-600 px-5 py-3 text-sm font-medium text-white hover:bg-blue-700"
-            >
-              แก้ไข PO
-            </Link>
-
-            {canCreateInvoice && (
-              <Link
-                href={`/invoices/new?purchaseOrderId=${purchaseOrder.id}`}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
-              >
-                สร้าง Invoice จาก PO
-              </Link>
-            )}
+    <>
+      <PageHeader
+        back={{ href: "/purchase-orders", label: "กลับรายการ PO" }}
+        title={`PO No. ${purchaseOrder.poNumber}`}
+        description={`รายละเอียด Purchase Order · ${purchaseOrder.customer.name}`}
+        meta={<PoStatusBadge status={purchaseOrder.status} />}
+        actions={
+          <>
+            <ButtonLink href={`/purchase-orders/${purchaseOrder.id}/edit`} variant="outline">
+              <Pencil /> แก้ไข PO
+            </ButtonLink>
 
             {activeInvoice && (
-              <Link
-                href={`/invoices/${activeInvoice.id}`}
-                className="rounded-lg border border-blue-600 bg-white px-4 py-2 text-sm font-semibold text-blue-600 hover:bg-blue-50"
-              >
-                ดู Invoice {activeInvoice.invoiceNumber}
-              </Link>
+              <ButtonLink href={`/invoices/${activeInvoice.id}`} variant="primary">
+                <FileText /> ดู Invoice {activeInvoice.invoiceNumber}
+              </ButtonLink>
             )}
-          </div>
-        </div>
 
-        {/* PO Information */}
-        <section className="rounded-xl bg-white p-6 shadow-sm">
-          <div className="mb-5 border-b border-slate-200 pb-4">
-            <h2 className="text-lg font-semibold text-slate-800">ข้อมูล PO</h2>
-          </div>
+            {canCreateInvoice && (
+              <ButtonLink href={`/invoices/new?purchaseOrderId=${purchaseOrder.id}`} variant="brand">
+                <FilePlus2 /> สร้าง Invoice จาก PO
+              </ButtonLink>
+            )}
+          </>
+        }
+      />
 
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
-            <div>
-              <label className="text-xs text-slate-500">PO No.</label>
-              <div className="mt-1 font-medium text-slate-800">{purchaseOrder.poNumber}</div>
-            </div>
+      {activeInvoice ? (
+        <Alert tone="info" title="PO นี้มี Invoice แล้ว" className="mb-6">
+          <Link href={`/invoices/${activeInvoice.id}`} className="font-medium underline underline-offset-2">
+            Invoice {activeInvoice.invoiceNumber}
+          </Link>{" "}
+          สร้างจาก PO นี้แล้ว (1 PO ออก Invoice ได้ 1 ใบ) หากต้องการออกใหม่ ให้ยกเลิก Invoice เดิมก่อน
+        </Alert>
+      ) : (
+        purchaseOrder.status === "CANCELLED" && (
+          <Alert tone="warning" title="PO นี้ถูกยกเลิกแล้ว" className="mb-6">
+            จึงสร้าง Invoice จาก PO นี้ไม่ได้
+          </Alert>
+        )
+      )}
 
-            <div>
-              <label className="text-xs text-slate-500">วันที่ PO</label>
-              <div className="mt-1 font-medium text-slate-800">{formatDate(purchaseOrder.poDate)}</div>
-            </div>
+      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-3">
+        {/* Main column: lines and invoices */}
+        <div className="min-w-0 space-y-6 xl:col-span-2">
+          <Card>
+            <CardHeader title="รายการสินค้า" description={`${purchaseOrder.items.length} รายการ`} />
 
-            <div>
-              <label className="text-xs text-slate-500">สถานะ</label>
-              <div className="mt-1">
-                <span
-                  className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${poStatusClass(
-                    purchaseOrder.status
-                  )}`}
-                >
-                  {poStatusLabel(purchaseOrder.status)}
-                </span>
-              </div>
-            </div>
-
-            <div>
-              <label className="text-xs text-slate-500">PLANT</label>
-              <div className="mt-1 text-slate-800">{purchaseOrder.plant || "-"}</div>
-            </div>
-
-            <div>
-              <label className="text-xs text-slate-500">วันที่ส่งสินค้า</label>
-              <div className="mt-1 text-slate-800">{formatDate(purchaseOrder.deliveryDate)}</div>
-            </div>
-
-            <div>
-              <label className="text-xs text-slate-500">สถานที่ส่งสินค้า</label>
-              <div className="mt-1 text-slate-800">{purchaseOrder.deliveryPlace || "-"}</div>
-            </div>
-
-            <div>
-              <label className="text-xs text-slate-500">วางบิล</label>
-              <div className="mt-1 text-slate-800">{purchaseOrder.billPlacement || "-"}</div>
-            </div>
-
-            <div>
-              <label className="text-xs text-slate-500">เครดิต / Payment Term</label>
-              <div className="mt-1 text-slate-800">{purchaseOrder.paymentTerm || "-"}</div>
-            </div>
-
-            <div>
-              <label className="text-xs text-slate-500">Quotation No.</label>
-              <div className="mt-1 text-slate-800">{purchaseOrder.quotationNumber || "-"}</div>
-            </div>
-
-            <div>
-              <label className="text-xs text-slate-500">วันที่ Quotation</label>
-              <div className="mt-1 text-slate-800">{formatDate(purchaseOrder.quotationDate)}</div>
-            </div>
-          </div>
-        </section>
-
-        {/* Customer */}
-        <section className="rounded-xl bg-white p-6 shadow-sm">
-          <div className="mb-5 border-b border-slate-200 pb-4">
-            <h2 className="text-lg font-semibold text-slate-800">ข้อมูลลูกค้า</h2>
-          </div>
-
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-            <div>
-              <label className="text-xs text-slate-500">รหัสลูกค้า</label>
-              <div className="mt-1 font-medium text-slate-800">{purchaseOrder.customer.code}</div>
-            </div>
-
-            <div>
-              <label className="text-xs text-slate-500">ชื่อลูกค้า</label>
-              <div className="mt-1 font-medium text-slate-800">{purchaseOrder.customer.name}</div>
-            </div>
-
-            <div className="md:col-span-2">
-              <label className="text-xs text-slate-500">ที่อยู่</label>
-              <div className="mt-1 text-slate-800">{purchaseOrder.customer.address || "-"}</div>
-            </div>
-
-            <div>
-              <label className="text-xs text-slate-500">โทรศัพท์</label>
-              <div className="mt-1 text-slate-800">{purchaseOrder.customer.tel || "-"}</div>
-            </div>
-
-            <div>
-              <label className="text-xs text-slate-500">เลขประจำตัวผู้เสียภาษี</label>
-              <div className="mt-1 text-slate-800">{purchaseOrder.customer.taxId || "-"}</div>
-            </div>
-
-            <div>
-              <label className="text-xs text-slate-500">ผู้ติดต่อ</label>
-              <div className="mt-1 text-slate-800">
-                {purchaseOrder.contactName || purchaseOrder.customer.contactName || "-"}
-              </div>
-            </div>
-
-            <div>
-              <label className="text-xs text-slate-500">โทรศัพท์ผู้ติดต่อ</label>
-              <div className="mt-1 text-slate-800">
-                {purchaseOrder.contactPhone || purchaseOrder.contactMobile || "-"}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Items */}
-        <section className="rounded-xl bg-white p-6 shadow-sm">
-          <div className="mb-5 border-b border-slate-200 pb-4">
-            <h2 className="text-lg font-semibold text-slate-800">รายการสินค้า</h2>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="min-w-full">
+            <Table>
               <thead>
-                <tr className="border-b border-slate-200 bg-slate-50 text-sm">
-                  <th className="px-4 py-3 text-center">#</th>
-                  <th className="px-4 py-3 text-left">รายละเอียด</th>
-                  <th className="px-4 py-3 text-right">จำนวน</th>
-                  <th className="px-4 py-3 text-center">หน่วย</th>
-                  <th className="px-4 py-3 text-right">ราคาต่อหน่วย</th>
-                  <th className="px-4 py-3 text-right">ส่วนลด</th>
-                  <th className="px-4 py-3 text-right">VAT</th>
-                  <th className="px-4 py-3 text-right">จำนวนเงิน</th>
+                <tr>
+                  <Th align="center" className="w-12">
+                    #
+                  </Th>
+                  <Th>รายละเอียด</Th>
+                  <Th align="right">จำนวน</Th>
+                  <Th align="center">หน่วย</Th>
+                  <Th align="right">ราคาต่อหน่วย</Th>
+                  <Th align="right">ส่วนลด</Th>
+                  <Th align="right">VAT</Th>
+                  <Th align="right">จำนวนเงิน</Th>
                 </tr>
               </thead>
 
               <tbody>
                 {purchaseOrder.items.map((item) => (
-                  <tr key={item.id} className="border-b border-slate-100">
-                    <td className="px-4 py-4 text-center text-sm">{item.itemNo}</td>
+                  <Tr key={item.id}>
+                    <Td align="center" className="tabular-nums text-slate-400">
+                      {item.itemNo}
+                    </Td>
 
-                    <td className="px-4 py-4 text-sm text-slate-800">{item.description}</td>
+                    <Td className="min-w-56 text-slate-900">{item.description}</Td>
 
-                    <td className="px-4 py-4 text-right text-sm">{formatQuantity(item.quantity)}</td>
+                    <Td align="right" className="whitespace-nowrap tabular-nums">
+                      {formatQuantity(item.quantity)}
+                    </Td>
 
-                    <td className="px-4 py-4 text-center text-sm">{item.unit || "-"}</td>
+                    <Td align="center" className="whitespace-nowrap">
+                      {item.unit || "-"}
+                    </Td>
 
-                    <td className="px-4 py-4 text-right text-sm">{formatMoney(item.unitPrice)}</td>
+                    <Td align="right" className="whitespace-nowrap tabular-nums">
+                      {formatMoney(item.unitPrice)}
+                    </Td>
 
-                    <td className="px-4 py-4 text-right text-sm">
+                    <Td align="right" className="whitespace-nowrap tabular-nums">
                       {formatLineDiscount(item.discount, item.discountType) || "-"}
-                    </td>
+                    </Td>
 
-                    <td className="px-4 py-4 text-right text-sm">{formatPercent(item.vat) || "0%"}</td>
+                    <Td align="right" className="whitespace-nowrap tabular-nums">
+                      {formatPercent(item.vat) || "0%"}
+                    </Td>
 
-                    <td className="px-4 py-4 text-right text-sm font-medium">{formatMoney(item.amount)}</td>
-                  </tr>
+                    <Td align="right" className="whitespace-nowrap font-medium tabular-nums text-slate-900">
+                      {formatMoney(item.amount)}
+                    </Td>
+                  </Tr>
                 ))}
               </tbody>
-            </table>
-          </div>
+            </Table>
 
-          {/* Summary */}
-          <div className="mt-6 flex justify-end">
-            <div className="w-full max-w-md space-y-3">
-              <div className="flex justify-between text-sm">
-                <span className="text-slate-500">รวมก่อน VAT</span>
+            {/* Summary */}
+            <div className="flex justify-end rounded-b-xl bg-slate-50/60 px-5 py-4">
+              <dl className="w-full max-w-sm space-y-2 text-sm">
+                <div className="flex items-center justify-between gap-4">
+                  <dt className="text-slate-500">รวมก่อน VAT</dt>
+                  <dd className="font-medium tabular-nums text-slate-900">{formatMoney(subtotal)}</dd>
+                </div>
 
-                <span className="font-medium text-slate-800">{formatMoney(subtotal)}</span>
-              </div>
+                <div className="flex items-center justify-between gap-4">
+                  <dt className="text-slate-500">VAT</dt>
+                  <dd className="font-medium tabular-nums text-slate-900">{formatMoney(vat)}</dd>
+                </div>
 
-              <div className="flex justify-between text-sm">
-                <span className="text-slate-500">VAT</span>
-
-                <span className="font-medium text-slate-800">{formatMoney(vat)}</span>
-              </div>
-
-              <div className="flex justify-between border-t border-slate-200 pt-3">
-                <span className="font-semibold text-slate-800">ยอดรวมทั้งสิ้น</span>
-
-                <span className="text-xl font-bold text-blue-600">{formatMoney(grandTotal)}</span>
-              </div>
+                <div className="flex items-center justify-between gap-4 border-t border-slate-200 pt-3">
+                  <dt className="font-semibold text-slate-900">ยอดรวมทั้งสิ้น</dt>
+                  <dd className="text-xl font-semibold tabular-nums text-slate-900">{formatMoney(grandTotal)}</dd>
+                </div>
+              </dl>
             </div>
-          </div>
-        </section>
+          </Card>
 
-        {/* Other information */}
-        <section className="rounded-xl bg-white p-6 shadow-sm">
-          <div className="mb-5 border-b border-slate-200 pb-4">
-            <h2 className="text-lg font-semibold text-slate-800">ข้อมูลเพิ่มเติม</h2>
-          </div>
+          <Card>
+            <CardHeader title="Invoice ที่เกี่ยวข้อง" />
 
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-            <div>
-              <label className="text-xs text-slate-500">โทรศัพท์ผู้ติดต่อ</label>
-
-              <div className="mt-1 text-slate-800">{purchaseOrder.contactPhone || "-"}</div>
-            </div>
-
-            <div>
-              <label className="text-xs text-slate-500">มือถือผู้ติดต่อ</label>
-
-              <div className="mt-1 text-slate-800">{purchaseOrder.contactMobile || "-"}</div>
-            </div>
-
-            <div className="md:col-span-2">
-              <label className="text-xs text-slate-500">เงื่อนไขการรับสินค้า / ตรวจรับ</label>
-
-              <div className="mt-1 whitespace-pre-wrap text-slate-800">
-                {purchaseOrder.acceptanceCondition || "-"}
-              </div>
-            </div>
-
-            <div className="md:col-span-2">
-              <label className="text-xs text-slate-500">หมายเหตุ</label>
-
-              <div className="mt-1 whitespace-pre-wrap text-slate-800">{purchaseOrder.note || "-"}</div>
-            </div>
-          </div>
-        </section>
-
-        {/* Invoice */}
-        <section className="rounded-xl bg-white p-6 shadow-sm">
-          <div className="mb-5 flex items-center justify-between border-b border-slate-200 pb-4">
-            <h2 className="text-lg font-semibold text-slate-800">Invoice ที่เกี่ยวข้อง</h2>
-          </div>
-
-          {purchaseOrder.invoices.length === 0 ? (
-            <div className="py-8 text-center text-sm text-slate-500">ยังไม่มี Invoice ที่สร้างจาก PO นี้</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full">
+            {purchaseOrder.invoices.length === 0 ? (
+              <EmptyState
+                icon={FileText}
+                title="ยังไม่มี Invoice ที่สร้างจาก PO นี้"
+                className="py-8"
+                action={
+                  canCreateInvoice && (
+                    <ButtonLink
+                      href={`/invoices/new?purchaseOrderId=${purchaseOrder.id}`}
+                      variant="outline"
+                      size="sm"
+                    >
+                      <FilePlus2 /> สร้าง Invoice จาก PO
+                    </ButtonLink>
+                  )
+                }
+              />
+            ) : (
+              <Table>
                 <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50 text-sm">
-                    <th className="px-4 py-3 text-left">Invoice No.</th>
-                    <th className="px-4 py-3 text-left">วันที่</th>
-                    <th className="px-4 py-3 text-left">ประเภท</th>
-                    <th className="px-4 py-3 text-right">ยอดรวม</th>
-                    <th className="px-4 py-3 text-center">สถานะ</th>
+                  <tr>
+                    <Th>Invoice No.</Th>
+                    <Th>วันที่</Th>
+                    <Th>ประเภท</Th>
+                    <Th align="right">ยอดรวม</Th>
+                    <Th>สถานะ</Th>
                   </tr>
                 </thead>
 
                 <tbody>
                   {purchaseOrder.invoices.map((invoice) => (
-                    <tr key={invoice.id} className="border-b border-slate-100">
-                      <td className="px-4 py-4 text-sm font-medium">
-                        <Link href={`/invoices/${invoice.id}`} className="text-blue-600 hover:underline">
+                    <Tr key={invoice.id}>
+                      <Td className="whitespace-nowrap">
+                        <Link
+                          href={`/invoices/${invoice.id}`}
+                          className="font-medium text-slate-900 hover:text-brand-700"
+                        >
                           {invoice.invoiceNumber}
                         </Link>
-                      </td>
+                      </Td>
 
-                      <td className="px-4 py-4 text-sm">{formatDate(invoice.invoiceDate)}</td>
+                      <Td className="whitespace-nowrap">{formatDate(invoice.invoiceDate)}</Td>
 
-                      <td className="px-4 py-4 text-sm">{documentTypeLabel(invoice.documentType)}</td>
+                      <Td className="min-w-48">{documentTypeLabel(invoice.documentType)}</Td>
 
-                      <td className="px-4 py-4 text-right text-sm">{formatMoney(invoice.grandTotal)}</td>
+                      <Td align="right" className="whitespace-nowrap font-medium tabular-nums text-slate-900">
+                        {formatMoney(invoice.grandTotal)}
+                      </Td>
 
-                      <td className="px-4 py-4 text-center text-sm">
-                        <span
-                          className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${invoiceStatusClass(
-                            invoice.status
-                          )}`}
-                        >
-                          {invoiceStatusLabel(invoice.status)}
-                        </span>
-                      </td>
-                    </tr>
+                      <Td>
+                        <InvoiceStatusBadge status={invoice.status} />
+                      </Td>
+                    </Tr>
                   ))}
                 </tbody>
-              </table>
-            </div>
-          )}
-        </section>
+              </Table>
+            )}
+          </Card>
+        </div>
+
+        {/* Side column (shown first on small screens): PO, customer and other information */}
+        <div className="order-first min-w-0 space-y-6 xl:order-none">
+          <Card>
+            <CardHeader title="ข้อมูล PO" />
+            <CardBody className="py-2">
+              <DetailList
+                items={[
+                  { label: "วันที่ PO", value: formatDate(purchaseOrder.poDate) },
+                  { label: "PLANT", value: purchaseOrder.plant || "-" },
+                  { label: "วันที่ส่งสินค้า", value: formatDate(purchaseOrder.deliveryDate) },
+                  { label: "สถานที่ส่งสินค้า", value: purchaseOrder.deliveryPlace || "-" },
+                  { label: "วางบิล", value: purchaseOrder.billPlacement || "-" },
+                  { label: "เครดิต / Payment Term", value: purchaseOrder.paymentTerm || "-" },
+                  { label: "Quotation No.", value: purchaseOrder.quotationNumber || "-" },
+                  { label: "วันที่ Quotation", value: formatDate(purchaseOrder.quotationDate) },
+                ]}
+              />
+            </CardBody>
+          </Card>
+
+          <Card>
+            <CardHeader title="ข้อมูลลูกค้า" />
+            <CardBody className="space-y-4">
+              <div className="min-w-0">
+                <Link
+                  href={`/customers/${purchaseOrder.customer.id}`}
+                  className="font-medium text-slate-900 hover:text-brand-700"
+                >
+                  {purchaseOrder.customer.name}
+                </Link>
+                <p className="text-xs text-slate-500">รหัสลูกค้า {purchaseOrder.customer.code}</p>
+              </div>
+
+              <DetailBlock label="ที่อยู่">{purchaseOrder.customer.address}</DetailBlock>
+
+              <DetailList
+                className="border-t border-slate-100"
+                items={[
+                  { label: "โทรศัพท์", value: purchaseOrder.customer.tel || "-" },
+                  { label: "เลขประจำตัวผู้เสียภาษี", value: purchaseOrder.customer.taxId || "-" },
+                  {
+                    label: "ผู้ติดต่อ",
+                    value: purchaseOrder.contactName || purchaseOrder.customer.contactName || "-",
+                  },
+                  { label: "โทรศัพท์ผู้ติดต่อ", value: purchaseOrder.contactPhone || "-" },
+                  { label: "มือถือผู้ติดต่อ", value: purchaseOrder.contactMobile || "-" },
+                ]}
+              />
+            </CardBody>
+          </Card>
+
+          <Card>
+            <CardHeader title="ข้อมูลเพิ่มเติม" />
+            <CardBody className="space-y-4">
+              <DetailBlock label="เงื่อนไขการรับสินค้า / ตรวจรับ">{purchaseOrder.acceptanceCondition}</DetailBlock>
+              <DetailBlock label="หมายเหตุ">{purchaseOrder.note}</DetailBlock>
+            </CardBody>
+          </Card>
+        </div>
       </div>
-    </main>
+    </>
   );
 }

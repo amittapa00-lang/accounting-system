@@ -1,10 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { LogOut } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 
-export default function LogoutButton() {
+import { cn } from "@/components/ui/cn";
+
+export default function LogoutButton({ compact = false }: { compact?: boolean }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 
@@ -23,9 +26,15 @@ export default function LogoutButton() {
       type="button"
       onClick={handleLogout}
       disabled={loading}
-      className="rounded-lg bg-red-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-600 disabled:opacity-60"
+      title="ออกจากระบบ"
+      aria-label="ออกจากระบบ"
+      className={cn(
+        "inline-flex items-center justify-center gap-2 rounded-lg text-sm font-medium text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-60",
+        compact ? "size-9" : "h-9 px-3"
+      )}
     >
-      {loading ? "กำลังออก..." : "ออกจากระบบ"}
+      <LogOut className="size-4" />
+      {!compact && (loading ? "กำลังออก..." : "ออกจากระบบ")}
     </button>
   );
 }

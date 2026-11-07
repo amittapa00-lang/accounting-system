@@ -2,9 +2,15 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { ChevronRight, ClipboardList, Plus, Search, SearchX, X } from "lucide-react";
 
+import { PoStatusBadge } from "@/components/ui/badge";
+import { Button, ButtonLink } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/feedback";
+import { Input } from "@/components/ui/form";
+import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { formatDate, formatMoney } from "@/lib/format";
-import { poStatusClass, poStatusLabel } from "@/lib/labels";
 
 type PurchaseOrder = {
   id: string;
@@ -43,127 +49,127 @@ export default function PurchaseOrderList({ purchaseOrders }: Props) {
     });
   }, [search, purchaseOrders]);
 
+  if (purchaseOrders.length === 0) {
+    return (
+      <Card>
+        <EmptyState
+          icon={ClipboardList}
+          title="ยังไม่มีข้อมูล PO"
+          description="เริ่มต้นด้วยการสร้าง Purchase Order แรก แล้วออก Invoice จาก PO ได้ภายหลัง"
+          action={
+            <ButtonLink href="/purchase-orders/new" variant="outline" size="sm">
+              <Plus /> สร้าง PO ใหม่
+            </ButtonLink>
+          }
+        />
+      </Card>
+    );
+  }
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800">รายการ Purchase Order</h1>
+    <Card>
+      {/* Search + count */}
+      <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative min-w-0 sm:max-w-md sm:flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
 
-          <p className="mt-1 text-sm text-slate-500">จัดการและค้นหาใบสั่งซื้อของลูกค้า</p>
-        </div>
-
-        <Link
-          href="/purchase-orders/new"
-          className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-5 py-3 text-sm font-medium text-white transition hover:bg-blue-700"
-        >
-          + เพิ่ม PO
-        </Link>
-      </div>
-
-      {/* Search */}
-      <div className="rounded-xl bg-white p-4 shadow-sm">
-        <div className="relative">
-          <input
+          <Input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="ค้นหา PO No., รหัสลูกค้า หรือชื่อลูกค้า..."
-            className="w-full rounded-lg border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            aria-label="ค้นหา PO"
+            className="pl-9 pr-10"
           />
-        </div>
-      </div>
 
-      {/* Summary */}
-      <div className="rounded-xl bg-white px-5 py-4 shadow-sm">
-        <div className="text-sm text-slate-500">
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch("")}
+              aria-label="ล้างคำค้นหา"
+              title="ล้าง"
+              className="absolute right-1.5 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+            >
+              <X className="size-4" />
+            </button>
+          )}
+        </div>
+
+        <p className="shrink-0 text-sm text-slate-500">
           พบทั้งหมด{" "}
-          <span className="font-semibold text-slate-800">{filteredPurchaseOrders.length}</span> รายการ
-        </div>
+          <span className="font-semibold tabular-nums text-slate-900">{filteredPurchaseOrders.length}</span> รายการ
+        </p>
       </div>
 
-      {/* Table */}
-      <div className="overflow-hidden rounded-xl bg-white shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="min-w-full">
-            <thead>
-              <tr className="border-b border-slate-200 bg-slate-50 text-left text-sm text-slate-600">
-                <th className="whitespace-nowrap px-5 py-4 font-semibold">PO No.</th>
+      {filteredPurchaseOrders.length === 0 ? (
+        <EmptyState
+          icon={SearchX}
+          title="ไม่พบข้อมูล PO ที่ค้นหา"
+          description="ลองค้นหาด้วยเลขที่ PO รหัสลูกค้า หรือชื่อลูกค้าอื่น"
+          action={
+            <Button variant="outline" size="sm" onClick={() => setSearch("")}>
+              ล้างการค้นหา
+            </Button>
+          }
+        />
+      ) : (
+        <Table>
+          <thead>
+            <tr>
+              <Th>PO No.</Th>
+              <Th>วันที่ PO</Th>
+              <Th>ลูกค้า</Th>
+              <Th align="center">จำนวนรายการ</Th>
+              <Th align="right">ยอดรวม (รวม VAT)</Th>
+              <Th>สถานะ</Th>
+              {/* relative: keeps the sr-only text inside the scrolling table on phones */}
+              <Th align="right" className="relative">
+                <span className="sr-only">จัดการ</span>
+              </Th>
+            </tr>
+          </thead>
 
-                <th className="whitespace-nowrap px-5 py-4 font-semibold">วันที่ PO</th>
+          <tbody>
+            {filteredPurchaseOrders.map((po) => (
+              <Tr key={po.id}>
+                <Td className="whitespace-nowrap">
+                  <Link
+                    href={`/purchase-orders/${po.id}`}
+                    className="font-medium text-slate-900 hover:text-brand-700"
+                  >
+                    {po.poNumber}
+                  </Link>
+                </Td>
 
-                <th className="whitespace-nowrap px-5 py-4 font-semibold">ลูกค้า</th>
+                <Td className="whitespace-nowrap">{formatDate(po.poDate)}</Td>
 
-                <th className="whitespace-nowrap px-5 py-4 text-center font-semibold">จำนวนรายการ</th>
+                <Td className="min-w-48">
+                  <p className="font-medium text-slate-900">{po.customer.name}</p>
+                  <p className="text-xs text-slate-500">รหัสลูกค้า: {po.customer.code}</p>
+                </Td>
 
-                <th className="whitespace-nowrap px-5 py-4 text-right font-semibold">ยอดรวม (รวม VAT)</th>
+                <Td align="center" className="tabular-nums">
+                  {po.itemCount}
+                </Td>
 
-                <th className="whitespace-nowrap px-5 py-4 text-center font-semibold">สถานะ</th>
+                <Td align="right" className="whitespace-nowrap font-medium tabular-nums text-slate-900">
+                  {formatMoney(po.grandTotal)}
+                </Td>
 
-                <th className="whitespace-nowrap px-5 py-4 text-center font-semibold">จัดการ</th>
-              </tr>
-            </thead>
+                <Td>
+                  <PoStatusBadge status={po.status} />
+                </Td>
 
-            <tbody>
-              {filteredPurchaseOrders.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-5 py-12 text-center text-sm text-slate-500">
-                    {search ? "ไม่พบข้อมูล PO ที่ค้นหา" : "ยังไม่มีข้อมูล PO"}
-                  </td>
-                </tr>
-              ) : (
-                filteredPurchaseOrders.map((po) => (
-                  <tr key={po.id} className="border-b border-slate-100 transition hover:bg-slate-50">
-                    {/* PO Number */}
-                    <td className="px-5 py-4">
-                      <div className="font-semibold text-slate-800">{po.poNumber}</div>
-                    </td>
-
-                    {/* Date */}
-                    <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-600">
-                      {formatDate(po.poDate)}
-                    </td>
-
-                    {/* Customer */}
-                    <td className="px-5 py-4">
-                      <div className="font-medium text-slate-800">{po.customer.name}</div>
-
-                      <div className="mt-1 text-xs text-slate-500">รหัสลูกค้า: {po.customer.code}</div>
-                    </td>
-
-                    {/* Item count */}
-                    <td className="px-5 py-4 text-center text-sm text-slate-600">{po.itemCount}</td>
-
-                    {/* Total */}
-                    <td className="whitespace-nowrap px-5 py-4 text-right text-sm font-semibold text-slate-800">
-                      {formatMoney(po.grandTotal)}
-                    </td>
-
-                    {/* Status */}
-                    <td className="px-5 py-4 text-center">
-                      <span
-                        className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${poStatusClass(po.status)}`}
-                      >
-                        {poStatusLabel(po.status)}
-                      </span>
-                    </td>
-
-                    {/* Actions */}
-                    <td className="px-5 py-4 text-center">
-                      <Link
-                        href={`/purchase-orders/${po.id}`}
-                        className="inline-flex rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-blue-500 hover:text-blue-600"
-                      >
-                        ดูรายละเอียด
-                      </Link>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
+                <Td align="right">
+                  <ButtonLink href={`/purchase-orders/${po.id}`} variant="ghost" size="sm">
+                    ดูรายละเอียด <ChevronRight />
+                  </ButtonLink>
+                </Td>
+              </Tr>
+            ))}
+          </tbody>
+        </Table>
+      )}
+    </Card>
   );
 }

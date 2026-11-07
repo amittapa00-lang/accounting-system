@@ -1,9 +1,17 @@
 import Link from "next/link";
+import { ClipboardList, Eye, FilePen, FileSpreadsheet, FileText, Wallet } from "lucide-react";
 
+import { Badge, InvoiceStatusBadge } from "@/components/ui/badge";
+import { ButtonAnchor, ButtonLink } from "@/components/ui/button";
+import { Card, CardHeader } from "@/components/ui/card";
+import { StatCard } from "@/components/ui/data-display";
+import { EmptyState } from "@/components/ui/feedback";
+import { PageHeader } from "@/components/ui/page-header";
+import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageSession } from "@/lib/auth";
 import { formatDate, formatMoney } from "@/lib/format";
-import { isBilledInvoiceStatus } from "@/lib/invoices";
-import { documentTypeLabel, invoiceStatusClass, invoiceStatusLabel } from "@/lib/labels";
+import { isBilledInvoiceStatus, isInvoiceOverdue } from "@/lib/invoices";
+import { documentTypeLabel } from "@/lib/labels";
 import { sumMoney } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 
@@ -37,146 +45,149 @@ export default async function InvoicesPage() {
   const draftCount = invoices.filter((invoice) => invoice.status === "DRAFT").length;
 
   return (
-    <main className="min-h-screen bg-slate-100 p-6">
-      <div className="mx-auto max-w-7xl">
-        {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-800">Invoice</h1>
+    <>
+      <PageHeader title="Invoice" description="รายการใบแจ้งหนี้และเอกสารการขาย" />
 
-          <p className="mt-1 text-sm text-slate-500">รายการใบแจ้งหนี้และเอกสารการขาย</p>
-        </div>
-
-        {/* Summary */}
-        <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
-          <div className="rounded-xl bg-white p-5 shadow-sm">
-            <p className="text-sm text-slate-500">จำนวน Invoice</p>
-
-            <p className="mt-2 text-2xl font-bold text-slate-800">{invoices.length.toLocaleString("en-US")}</p>
-          </div>
-
-          <div className="rounded-xl bg-white p-5 shadow-sm">
-            <p className="text-sm text-slate-500">ยอดรวม Invoice ที่ออกแล้ว</p>
-
-            <p className="mt-2 text-2xl font-bold text-slate-800">{formatMoney(billedTotal)}</p>
-          </div>
-
-          <div className="rounded-xl bg-white p-5 shadow-sm">
-            <p className="text-sm text-slate-500">Invoice ฉบับร่าง</p>
-
-            <p className="mt-2 text-2xl font-bold text-amber-600">{draftCount}</p>
-          </div>
-        </div>
-
-        {/* Table */}
-        <div className="overflow-hidden rounded-xl bg-white shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1100px]">
-              <thead className="bg-slate-800 text-white">
-                <tr>
-                  <th className="px-4 py-3 text-left text-sm font-semibold">Invoice No.</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold">วันที่</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold">Customer</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold">PO No.</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold">ประเภทเอกสาร</th>
-                  <th className="px-4 py-3 text-right text-sm font-semibold">จำนวนเงิน</th>
-                  <th className="px-4 py-3 text-center text-sm font-semibold">สถานะ</th>
-                  <th className="px-4 py-3 text-center text-sm font-semibold">จัดการ</th>
-                </tr>
-              </thead>
-
-              <tbody className="divide-y divide-slate-200">
-                {invoices.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="px-4 py-12 text-center text-sm text-slate-500">
-                      ยังไม่มี Invoice
-                    </td>
-                  </tr>
-                ) : (
-                  invoices.map((invoice) => {
-                    const itemCount = invoice._count.items;
-                    const isCancelled = invoice.status === "CANCELLED";
-
-                    return (
-                      <tr key={invoice.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-4">
-                          <div className="font-semibold text-slate-800">{invoice.invoiceNumber}</div>
-
-                          <div className="text-xs text-slate-400">{itemCount} รายการ</div>
-                        </td>
-
-                        <td className="px-4 py-4 text-sm text-slate-600">{formatDate(invoice.invoiceDate)}</td>
-
-                        <td className="px-4 py-4">
-                          <div className="font-medium text-slate-800">{invoice.customerNameSnapshot}</div>
-                        </td>
-
-                        <td className="px-4 py-4">
-                          <Link
-                            href={`/purchase-orders/${invoice.purchaseOrder.id}`}
-                            className="text-sm font-medium text-blue-600 hover:underline"
-                          >
-                            {invoice.purchaseOrder.poNumber}
-                          </Link>
-                        </td>
-
-                        <td className="px-4 py-4 text-sm text-slate-600">{documentTypeLabel(invoice.documentType)}</td>
-
-                        <td className="px-4 py-4 text-right">
-                          <span className="font-semibold text-slate-800">{formatMoney(invoice.grandTotal)}</span>
-
-                          <div className="text-xs text-slate-400">VAT {formatMoney(invoice.vat)}</div>
-                        </td>
-
-                        <td className="px-4 py-4 text-center">
-                          <span
-                            className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${invoiceStatusClass(
-                              invoice.status
-                            )}`}
-                          >
-                            {invoiceStatusLabel(invoice.status)}
-                          </span>
-                        </td>
-
-                        <td className="px-4 py-4 text-center">
-                          <div className="flex flex-wrap justify-center gap-2">
-                            <Link
-                              href={`/invoices/${invoice.id}`}
-                              className="inline-flex rounded-lg bg-slate-800 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700"
-                            >
-                              ดูรายละเอียด
-                            </Link>
-
-                            {/* Invoice ที่ยกเลิกแล้วดาวน์โหลดไม่ได้ (route ตอบ 409) */}
-                            {!isCancelled && (
-                              <a
-                                href={`/api/invoices/${invoice.id}/pdf`}
-                                target="_blank"
-                                rel="noopener"
-                                className="inline-flex whitespace-nowrap rounded-lg bg-slate-600 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700"
-                              >
-                                📄 PDF
-                              </a>
-                            )}
-
-                            {!isCancelled && (
-                              <a
-                                href={`/api/invoices/${invoice.id}/excel`}
-                                className="inline-flex whitespace-nowrap rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-                              >
-                                ↓ ดาวน์โหลด Excel
-                              </a>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <StatCard
+          label="จำนวน Invoice"
+          value={invoices.length.toLocaleString("en-US")}
+          hint="รวมทุกสถานะ"
+          icon={FileText}
+          tone="info"
+        />
+        <StatCard
+          label="ยอดรวม Invoice ที่ออกแล้ว"
+          value={`฿${formatMoney(billedTotal)}`}
+          hint="ไม่รวมฉบับร่างและที่ยกเลิก"
+          icon={Wallet}
+          tone="success"
+        />
+        <StatCard
+          label="Invoice ฉบับร่าง"
+          value={draftCount.toLocaleString("en-US")}
+          hint="ยังไม่ได้ออก Invoice"
+          icon={FilePen}
+          tone="warning"
+        />
       </div>
-    </main>
+
+      <Card className="mt-6">
+        <CardHeader title="Invoice ทั้งหมด" description={`${invoices.length.toLocaleString("en-US")} รายการ ล่าสุดก่อน`} />
+
+        {invoices.length === 0 ? (
+          <EmptyState
+            icon={FileText}
+            title="ยังไม่มี Invoice"
+            description="สร้าง Invoice ได้จากหน้า Purchase Order โดยกด “สร้าง Invoice จาก PO”"
+            action={
+              <ButtonLink href="/purchase-orders" variant="outline" size="sm">
+                <ClipboardList /> ไปที่ Purchase Order
+              </ButtonLink>
+            }
+          />
+        ) : (
+          // Slightly tighter cells than the default so all columns fit next to the sidebar at 1280px
+          <Table className="[&_td]:px-3 [&_th]:px-3">
+            <thead>
+              <tr>
+                <Th>Invoice No.</Th>
+                <Th>ลูกค้า</Th>
+                <Th>วันที่</Th>
+                <Th align="right">จำนวนเงิน</Th>
+                <Th>สถานะ</Th>
+                <Th>จัดการ</Th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {invoices.map((invoice) => {
+                const itemCount = invoice._count.items;
+                const isCancelled = invoice.status === "CANCELLED";
+
+                return (
+                  <Tr key={invoice.id}>
+                    <Td>
+                      <Link
+                        href={`/invoices/${invoice.id}`}
+                        className="whitespace-nowrap font-medium text-slate-900 hover:text-brand-700 hover:underline"
+                      >
+                        {invoice.invoiceNumber}
+                      </Link>
+                      <p className="max-w-44 text-xs text-slate-500">
+                        {documentTypeLabel(invoice.documentType)}{" "}
+                        <span className="whitespace-nowrap">· {itemCount} รายการ</span>
+                      </p>
+                    </Td>
+
+                    <Td className="min-w-40">
+                      <p className="font-medium text-slate-900">{invoice.customerNameSnapshot}</p>
+                      <Link
+                        href={`/purchase-orders/${invoice.purchaseOrder.id}`}
+                        className="text-xs text-slate-500 hover:text-brand-700 hover:underline"
+                      >
+                        PO {invoice.purchaseOrder.poNumber}
+                      </Link>
+                    </Td>
+
+                    <Td className="whitespace-nowrap tabular-nums">
+                      {formatDate(invoice.invoiceDate)}
+                      {invoice.dueDate && (
+                        <p className="text-xs text-slate-500">ครบ {formatDate(invoice.dueDate)}</p>
+                      )}
+                    </Td>
+
+                    <Td align="right" className="whitespace-nowrap">
+                      <span className="font-semibold tabular-nums text-slate-900">{formatMoney(invoice.grandTotal)}</span>
+                      <p className="text-xs tabular-nums text-slate-500">VAT {formatMoney(invoice.vat)}</p>
+                    </Td>
+
+                    <Td>
+                      <div className="flex flex-col items-start gap-1">
+                        <InvoiceStatusBadge status={invoice.status} />
+                        {isInvoiceOverdue(invoice.status, invoice.dueDate) && <Badge tone="danger">เกินกำหนด</Badge>}
+                      </div>
+                    </Td>
+
+                    <Td>
+                      <div className="flex gap-1.5">
+                        <ButtonLink href={`/invoices/${invoice.id}`} variant="ghost" size="sm" title="ดูรายละเอียด">
+                          <Eye /> ดู
+                        </ButtonLink>
+
+                        {/* Invoice ที่ยกเลิกแล้วดาวน์โหลดไม่ได้ (route ตอบ 409) */}
+                        {!isCancelled && (
+                          <ButtonAnchor
+                            href={`/api/invoices/${invoice.id}/pdf`}
+                            target="_blank"
+                            rel="noopener"
+                            variant="outline"
+                            size="sm"
+                            title="เปิด PDF"
+                          >
+                            <FileText /> PDF
+                          </ButtonAnchor>
+                        )}
+
+                        {!isCancelled && (
+                          <ButtonAnchor
+                            href={`/api/invoices/${invoice.id}/excel`}
+                            variant="outline"
+                            size="sm"
+                            title="ดาวน์โหลด Excel"
+                          >
+                            <FileSpreadsheet /> Excel
+                          </ButtonAnchor>
+                        )}
+                      </div>
+                    </Td>
+                  </Tr>
+                );
+              })}
+            </tbody>
+          </Table>
+        )}
+      </Card>
+    </>
   );
 }

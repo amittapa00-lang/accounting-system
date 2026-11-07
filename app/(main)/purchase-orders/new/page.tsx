@@ -2,6 +2,7 @@ import { requirePageSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 import PurchaseOrderForm from "@/components/purchase-orders/PurchaseOrderForm";
+import { PageHeader } from "@/components/ui/page-header";
 
 export const instant = false;
 
@@ -29,16 +30,14 @@ export default async function NewPurchaseOrderPage() {
   });
 
   return (
-    <main className="p-6">
-      <div className="mx-auto max-w-7xl">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-800">เพิ่ม Purchase Order</h1>
+    <>
+      <PageHeader
+        back={{ href: "/purchase-orders", label: "กลับรายการ PO" }}
+        title="สร้าง Purchase Order"
+        description="กรอกข้อมูลใบสั่งซื้อและรายการสินค้า"
+      />
 
-          <p className="mt-1 text-sm text-slate-500">สร้างใบสั่งซื้อใหม่</p>
-        </div>
-
-        <PurchaseOrderForm customers={customers} />
-      </div>
-    </main>
+      <PurchaseOrderForm customers={customers} />
+    </>
   );
 }
