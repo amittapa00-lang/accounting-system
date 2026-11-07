@@ -64,9 +64,11 @@ const CUSTOMER = {
 
 const RIGHT_BOX = {
   /** Ship To row is 155-185: first line continues after the printed label, second line below it. */
+  // The row is only ~10 mm tall; the second line stays ~1.5 mm above the row's bottom line
+  // so dot-matrix feed tolerance does not push it onto the "Due Date" label.
   shipTo: [
-    { x: 557, y: 167, width: 83 },
-    { x: 479, y: 181, width: 161 },
+    { x: 557, y: 166.5, width: 83 },
+    { x: 479, y: 179, width: 161 },
   ] as Slot[],
   dueDate: { x: 535, y: 208.5, width: 105 } as Slot,
   paymentTerm: { x: 479, y: 241, width: 161 } as Slot,
