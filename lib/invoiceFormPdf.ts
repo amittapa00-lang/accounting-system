@@ -39,6 +39,14 @@ const ARTWORK_HEIGHT = 1031.81;
 
 const FONT_SIZE = { normal: 9, small: 8, total: 10 };
 
+/**
+ * Rightmost x (artwork coordinates) that any text may reach. The Epson LQ-630 is an
+ * 80-column printer: its head covers about 8 inches from the paper's left edge, and a test
+ * print on the real form clipped everything beyond ~8.1 in. So nothing is drawn past 8.0 in,
+ * even where the printed box on the form is wider (right-aligned amounts end here instead).
+ */
+const RIGHT_EDGE = TRIM.x + 8 * 72 - 1; // 616
+
 /** Single-line fields: [x, baseline y, max width, align]. */
 type Slot = { x: number; y: number; width: number; align?: "left" | "center" | "right" };
 
@@ -184,7 +192,9 @@ function wrapUnits(paragraph: string): string[] {
 
   for (const { segment } of wordSegmenter.segment(paragraph)) {
     const last = units[units.length - 1];
-    if (last !== undefined && ascii.test(last) && ascii.test(segment)) {
+    // never end a line on an opening bracket: "(" sticks to the word after it
+    const lastIsOpening = last !== undefined && /[([{]$/.test(last);
+    if (last !== undefined && (lastIsOpening || (ascii.test(last) && ascii.test(segment)))) {
       units[units.length - 1] = last + segment;
     } else {
       units.push(segment);
@@ -198,7 +208,9 @@ function wrapUnits(paragraph: string): string[] {
 function wrapText(doc: Doc, text: string, width: number): string[] {
   const lines: string[] = [];
 
-  for (const paragraph of text.split(/\r?\n/)) {
+  // Leading/trailing blank lines (e.g. an Enter typed before the text) would push the
+  // description below the row's numbers, so they are dropped.
+  for (const paragraph of text.trim().split(/\r?\n/)) {
     let line = "";
 
     for (const segment of wrapUnits(paragraph)) {
@@ -239,6 +251,9 @@ function wrapText(doc: Doc, text: string, width: number): string[] {
 function drawFitted(doc: Doc, text: string | null | undefined, slot: Slot, size: number, bold = false, minSize = 6.5) {
   const value = (text ?? "").replace(/\s+/g, " ").trim();
   if (!value) return;
+
+  // keep inside the printer's reach (see RIGHT_EDGE); right/center alignment uses the clamped box
+  slot = { ...slot, width: Math.max(0, Math.min(slot.width, RIGHT_EDGE - slot.x)) };
 
   let fontSize = size;
   setFont(doc, bold, fontSize);
@@ -335,9 +350,16 @@ function drawHeader(doc: Doc, invoice: InvoiceForForm, pageIndex: number, pageCo
   const [shipFirst, shipSecond] = RIGHT_BOX.shipTo;
   setFont(doc, false, FONT_SIZE.small);
   const shipText = (invoice.shipToSnapshot ?? "").replace(/\s+/g, " ").trim();
-  const firstLine = wrapText(doc, shipText, shipFirst.width)[0] ?? "";
-  drawFitted(doc, firstLine, shipFirst, FONT_SIZE.small);
-  drawFitted(doc, shipText.slice(firstLine.length).trim(), shipSecond, FONT_SIZE.small);
+  const secondWidth = Math.min(shipSecond.width, RIGHT_EDGE - shipSecond.x);
+  if (measure(doc, shipText) <= secondWidth) {
+    // fits on the full-width line under the label
+    drawFitted(doc, shipText, shipSecond, FONT_SIZE.small);
+  } else {
+    const firstWidth = Math.min(shipFirst.width, RIGHT_EDGE - shipFirst.x);
+    const firstLine = wrapText(doc, shipText, firstWidth)[0] ?? "";
+    drawFitted(doc, firstLine, shipFirst, FONT_SIZE.small);
+    drawFitted(doc, shipText.slice(firstLine.length).trim(), shipSecond, FONT_SIZE.small);
+  }
   drawFitted(doc, formatDate(invoice.dueDate, ""), RIGHT_BOX.dueDate, FONT_SIZE.normal);
   drawFitted(doc, invoice.paymentTerm, RIGHT_BOX.paymentTerm, FONT_SIZE.normal);
 
