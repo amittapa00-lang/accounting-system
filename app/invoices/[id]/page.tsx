@@ -234,12 +234,13 @@ export default async function InvoiceDetailPage({
               </Link>
             )}
 
-           <a
-  href={`/api/invoices/${invoice.id}/xlsx`}
-  className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
->
-  📄 ดาวน์โหลด Excel
-</a>
+            <Link
+              href={`/invoices/${invoice.id}/print`}
+              target="_blank"
+              className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+            >
+              🖨️ พิมพ์ / PDF
+            </Link>
           </div>
         </div>
 
