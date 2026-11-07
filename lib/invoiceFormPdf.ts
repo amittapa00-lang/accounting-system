@@ -47,6 +47,15 @@ const FONT_SIZE = { normal: 9, small: 8, total: 10 };
  */
 const RIGHT_EDGE = TRIM.x + 8 * 72 - 1; // 616
 
+/**
+ * The print offset moves everything on the page, but the printer's reach stays where it is,
+ * so a shift to the right (+dx) lowers the limit by the same amount.
+ */
+const rightEdgeByDoc = new WeakMap<object, number>();
+function rightEdge(doc: object) {
+  return rightEdgeByDoc.get(doc) ?? RIGHT_EDGE;
+}
+
 /** Single-line fields: [x, baseline y, max width, align]. */
 type Slot = { x: number; y: number; width: number; align?: "left" | "center" | "right" };
 
@@ -255,7 +264,7 @@ function drawFitted(doc: Doc, text: string | null | undefined, slot: Slot, size:
   if (!value) return;
 
   // keep inside the printer's reach (see RIGHT_EDGE); right/center alignment uses the clamped box
-  slot = { ...slot, width: Math.max(0, Math.min(slot.width, RIGHT_EDGE - slot.x)) };
+  slot = { ...slot, width: Math.max(0, Math.min(slot.width, rightEdge(doc) - slot.x)) };
 
   let fontSize = size;
   setFont(doc, bold, fontSize);
@@ -352,12 +361,12 @@ function drawHeader(doc: Doc, invoice: InvoiceForForm, pageIndex: number, pageCo
   const [shipFirst, shipSecond] = RIGHT_BOX.shipTo;
   setFont(doc, false, FONT_SIZE.small);
   const shipText = (invoice.shipToSnapshot ?? "").replace(/\s+/g, " ").trim();
-  const secondWidth = Math.min(shipSecond.width, RIGHT_EDGE - shipSecond.x);
+  const secondWidth = Math.min(shipSecond.width, rightEdge(doc) - shipSecond.x);
   if (measure(doc, shipText) <= secondWidth) {
     // fits on the full-width line under the label
     drawFitted(doc, shipText, shipSecond, FONT_SIZE.small);
   } else {
-    const firstWidth = Math.min(shipFirst.width, RIGHT_EDGE - shipFirst.x);
+    const firstWidth = Math.min(shipFirst.width, rightEdge(doc) - shipFirst.x);
     const firstLine = wrapText(doc, shipText, firstWidth)[0] ?? "";
     drawFitted(doc, firstLine, shipFirst, FONT_SIZE.small);
     drawFitted(doc, shipText.slice(firstLine.length).trim(), shipSecond, FONT_SIZE.small);
@@ -442,6 +451,7 @@ async function renderDataPages(invoice: InvoiceForForm, offsetMm: { x: number; y
     if (index > 0) doc.addPage();
     doc.save();
     doc.translate(offsetMm.x * MM, offsetMm.y * MM);
+    rightEdgeByDoc.set(doc, RIGHT_EDGE - Math.max(0, offsetMm.x) * MM);
     drawHeader(doc, invoice, index, pages.length);
     drawItems(doc, rows);
     drawTotals(doc, invoice, index === pages.length - 1);
