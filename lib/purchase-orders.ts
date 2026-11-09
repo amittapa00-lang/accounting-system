@@ -17,7 +17,7 @@ import {
   type Numeric,
   type ParsedDiscount,
 } from "@/lib/money";
-import { lineHasAmount, toLineType, type LineType } from "@/lib/lines";
+import { toLineType, type LineType } from "@/lib/lines";
 
 // ---------------------------------------------------------------- Limits
 
@@ -36,7 +36,7 @@ function hasAtMostDecimals(value: number, places: number): boolean {
 
 /** A PO line as typed in the form (or sent to the API). */
 export type PoItemInput = {
-  /** ITEM | HEADER | SUB (see lib/lines.ts); missing = ITEM */
+  /** ITEM | SUB (see lib/lines.ts); missing = ITEM */
   lineType?: unknown;
   description?: unknown;
   quantity?: unknown;
@@ -68,6 +68,12 @@ function trimmedText(value: unknown): string | null {
   return text === "" ? null : text;
 }
 
+/** A number typed in the form; an empty field counts as 0, anything that is not a number as null. */
+function blankAsZero(value: unknown): number | null {
+  if (value === undefined || value === null || (typeof value === "string" && value.trim() === "")) return 0;
+  return parseNumber(value as Numeric);
+}
+
 /** Validates one line. Throws MoneyInputError("รายการที่ N: ...") when invalid. */
 export function cleanPoItem(input: PoItemInput, index: number): CleanPoItem {
   function fail(message: string): never {
@@ -77,33 +83,20 @@ export function cleanPoItem(input: PoItemInput, index: number): CleanPoItem {
   const lineType = toLineType(input.lineType);
 
   const description = trimmedText(input.description);
-  if (!description) fail(lineType === "HEADER" ? "กรุณากรอกหัวข้อ" : "กรุณากรอกรายละเอียดสินค้า");
+  if (!description) fail("กรุณากรอกรายละเอียดสินค้า");
 
-  // A heading has no quantity, price, discount or VAT
-  if (!lineHasAmount(lineType)) {
-    return {
-      itemNo: index + 1,
-      lineType,
-      description,
-      quantity: 0,
-      unit: null,
-      unitPrice: 0,
-      discount: 0,
-      discountType: "PERCENT",
-      vat: 0,
-      amount: 0,
-    };
-  }
-
-  const quantity = parseNumber(input.quantity as Numeric);
-  if (quantity === null || quantity <= 0) fail("จำนวนสินค้าต้องมากกว่า 0");
-  if (quantity > MAX_QUANTITY_OR_PRICE) fail("จำนวนสินค้ามากเกินไป");
-  if (!hasAtMostDecimals(quantity, 4)) fail("จำนวนสินค้ามีทศนิยมได้ไม่เกิน 4 ตำแหน่ง");
-
-  const unitPrice = parseNumber(input.unitPrice as Numeric);
+  // Quantity and price may be left at 0 for a text line (a heading or a note under a line):
+  // it prints only its description. A line with a price must have a quantity.
+  const unitPrice = blankAsZero(input.unitPrice);
   if (unitPrice === null || unitPrice < 0) fail("ราคาสินค้าไม่ถูกต้อง");
   if (unitPrice > MAX_QUANTITY_OR_PRICE) fail("ราคาสินค้ามากเกินไป");
   if (!hasAtMostDecimals(unitPrice, 4)) fail("ราคาสินค้ามีทศนิยมได้ไม่เกิน 4 ตำแหน่ง");
+
+  const quantity = blankAsZero(input.quantity);
+  if (quantity === null || quantity < 0) fail("จำนวนสินค้าไม่ถูกต้อง");
+  if (unitPrice > 0 && quantity === 0) fail("จำนวนสินค้าต้องมากกว่า 0 (ถ้าเป็นบรรทัดข้อความ ให้ลบราคาออก)");
+  if (quantity > MAX_QUANTITY_OR_PRICE) fail("จำนวนสินค้ามากเกินไป");
+  if (!hasAtMostDecimals(quantity, 4)) fail("จำนวนสินค้ามีทศนิยมได้ไม่เกิน 4 ตำแหน่ง");
 
   const vatInput = input.vat;
   const vat =
@@ -161,8 +154,6 @@ export function cleanPoItems(items: unknown): CleanPoItem[] {
  * Never throws: an invalid discount is ignored here (cleanPoItems reports it on submit).
  */
 export function previewPoLine(input: PoItemInput): number {
-  if (!lineHasAmount(input.lineType)) return 0;
-
   const quantity = toNumber(input.quantity as Numeric);
   const unitPrice = toNumber(input.unitPrice as Numeric);
   const { base } = calcLine({ quantity, unitPrice });

@@ -56,14 +56,14 @@ export function remainingQuantity(poQuantity: Numeric, billed: Numeric): number 
  * Amount for billing `quantity` units of a PO line when `billedBefore` units were billed on
  * earlier sub-invoices. A PERCENT discount applies as is. An AMOUNT (baht) discount is shared
  * in proportion to the quantity, cumulatively, so billing the whole line in parts adds up to
- * exactly the PO's discount and amount. HEADER lines have no amount.
+ * exactly the PO's discount and amount. Text lines (no unit price) have no amount.
  */
 export function partialLine(
   line: PoLineForInvoice,
   quantity: number,
   billedBefore = 0
 ): { amount: number; discount: number; discountType: string } {
-  if (!lineHasAmount(line.lineType)) {
+  if (!lineHasAmount(line)) {
     return { amount: 0, discount: 0, discountType: "PERCENT" };
   }
 
@@ -91,12 +91,12 @@ export function buildInvoiceLines<T extends PoLineForInvoice>(
 ): { lines: { line: T; quantity: number; amount: number; discount: number; discountType: string }[]; totals: DocumentTotals } {
   const lines = selection.map(({ line, quantity, billedBefore }) => ({
     line,
-    quantity: lineHasAmount(line.lineType) ? quantity : 0,
+    quantity: lineHasAmount(line) ? quantity : 0,
     ...partialLine(line, quantity, billedBefore ?? 0),
   }));
 
   const totals = calcDocumentTotals(
-    lines.filter(({ line }) => lineHasAmount(line.lineType)).map(({ line, amount }) => ({ amount, vat: line.vat })),
+    lines.filter(({ line }) => lineHasAmount(line)).map(({ line, amount }) => ({ amount, vat: line.vat })),
     billDiscount
   );
 

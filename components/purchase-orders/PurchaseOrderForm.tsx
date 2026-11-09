@@ -12,7 +12,7 @@ import { Alert } from "@/components/ui/feedback";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { formatMoney, todayInputValue } from "@/lib/format";
 import { PO_STATUSES } from "@/lib/labels";
-import { lineHasAmount, toLineType } from "@/lib/lines";
+import { toLineType } from "@/lib/lines";
 import { calcTotals, MoneyInputError } from "@/lib/money";
 import { cleanPoItems, previewPoLine, type PoLock } from "@/lib/purchase-orders";
 
@@ -145,6 +145,20 @@ export default function PurchaseOrderForm({ customers, initialData, lock = null 
     setItems((currentItems) => [...currentItems, newPOItem()]);
   }
 
+  /** Enter in a description: a new empty line of the same level right below it. */
+  function insertItemAfter(id: string): string {
+    const lineType = items.find((item) => item.id === id)?.lineType ?? "ITEM";
+    const added = newPOItem(lineType);
+
+    setItems((currentItems) => {
+      const index = currentItems.findIndex((item) => item.id === id);
+      if (index === -1) return [...currentItems, added];
+      return [...currentItems.slice(0, index + 1), added, ...currentItems.slice(index + 1)];
+    });
+
+    return added.id;
+  }
+
   function removeItem(id: string) {
     setItems((currentItems) => {
       if (currentItems.length === 1) {
@@ -163,15 +177,7 @@ export default function PurchaseOrderForm({ customers, initialData, lock = null 
         }
 
         if (field === "lineType") {
-          const lineType = toLineType(value);
-
-          // A saved heading is stored without quantity and VAT: give it the defaults of a new line
-          if (!lineHasAmount(item.lineType) && lineHasAmount(lineType) && item.quantity <= 0) {
-            const { quantity, vat } = newPOItem();
-            return { ...item, lineType, quantity, vat };
-          }
-
-          return { ...item, lineType };
+          return { ...item, lineType: toLineType(value) };
         }
 
         if (field === "description" || field === "unit" || field === "discount") {
@@ -504,6 +510,7 @@ export default function PurchaseOrderForm({ customers, initialData, lock = null 
           items={items}
           readOnly={linesLocked}
           onAdd={addItem}
+          onInsertAfter={insertItemAfter}
           onRemove={removeItem}
           onChange={updateItem}
         />

@@ -156,7 +156,7 @@ export type InvoiceForForm = {
   grandTotal: Numeric;
   items: {
     itemNo: number;
-    /** ITEM | HEADER | SUB (lib/lines.ts) */
+    /** ITEM | SUB (lib/lines.ts) */
     lineType?: string | null;
     description: string;
     quantity: Numeric;
@@ -307,9 +307,12 @@ type Row = { kind: "item"; item: InvoiceForForm["items"][number]; number: number
 const SUB_INDENT = 8;
 const MAX_NOTE_LINES = 6;
 
-/** Note lines ("หมายเหตุ" + the wrapped note) and the bill discount, drawn at the bottom of the last sheet. */
+/**
+ * Note lines ("หมายเหตุ" + the wrapped note) and the bill discount, drawn at the bottom of the
+ * last sheet. The note is plain text in the same size as the lines.
+ */
 function bottomBlock(doc: Doc, invoice: InvoiceForForm) {
-  setFont(doc, false, FONT_SIZE.small);
+  setFont(doc, false, FONT_SIZE.normal);
   const note = (invoice.note ?? "").trim();
   const noteLines = note
     ? ["หมายเหตุ", ...wrapText(doc, note, ITEMS.columns.description.width).filter((l) => l !== "")].slice(0, MAX_NOTE_LINES)
@@ -441,7 +444,6 @@ function drawItems(doc: Doc, rows: Row[]) {
     const y = ITEMS.firstBaseline + line * ITEMS.rowHeight;
     const { item } = row;
     const indent = item.lineType === "SUB" ? SUB_INDENT : 0;
-    const isHeading = item.lineType === "HEADER";
 
     if (row.number !== null) drawFitted(doc, String(row.number), { ...c.itemNo, y }, FONT_SIZE.normal);
     row.lines.forEach((text, i) => {
@@ -449,12 +451,12 @@ function drawItems(doc: Doc, rows: Row[]) {
         doc,
         text,
         { x: c.description.x + indent, y: y + i * ITEMS.rowHeight, width: c.description.width - indent },
-        FONT_SIZE.normal,
-        isHeading
+        FONT_SIZE.normal
       );
     });
 
-    if (lineHasAmount(item.lineType)) {
+    // a line without price is text only
+    if (lineHasAmount(item)) {
       const qty = formatQuantity(item.quantity) + (item.unit ? ` ${item.unit}` : "");
       drawFitted(doc, qty, { ...c.quantity, y }, FONT_SIZE.normal);
       drawFitted(doc, formatMoney(item.unitPrice), { ...c.unitPrice, y }, FONT_SIZE.normal);
@@ -474,7 +476,7 @@ function drawBottomBlock(doc: Doc, invoice: InvoiceForForm) {
 
   noteLines.forEach((text, i) => {
     const y = rowY(ITEMS.rows - noteLines.length + i);
-    drawFitted(doc, text, { x: c.description.x, y, width: c.description.width }, FONT_SIZE.small, i === 0);
+    drawFitted(doc, text, { x: c.description.x, y, width: c.description.width }, FONT_SIZE.normal);
   });
 
   if (discount > 0) {

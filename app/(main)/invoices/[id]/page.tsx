@@ -105,13 +105,13 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
   );
 
   // ==========================================
-  // รายการ: ลำดับที่แสดง (ITEM/HEADER มีเลข, SUB ไม่มี) และยอดรวมก่อนส่วนลดท้ายบิล
+  // รายการ: ลำดับที่แสดง (ITEM มีเลข, SUB ไม่มี) และยอดรวมก่อนส่วนลดท้ายบิล
   // ==========================================
 
   const lineNumbers = displayLineNumbers(invoice.items);
 
   const itemsTotal = sumMoney(
-    invoice.items.filter((item) => lineHasAmount(item.lineType)).map((item) => item.amount)
+    invoice.items.filter((item) => lineHasAmount(item)).map((item) => item.amount)
   );
 
   const billDiscountAmount = toNumber(invoice.billDiscountAmount);
@@ -340,15 +340,16 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
               <tbody>
                 {invoice.items.map((item, index) => {
                   const lineType = toLineType(item.lineType);
-                  const isHeader = lineType === "HEADER";
+                  // a line without price is text only (heading or note)
+                  const textOnly = !lineHasAmount(item);
 
                   return (
-                    <Tr key={item.id} className={cn(isHeader && "bg-slate-50/60")}>
+                    <Tr key={item.id}>
                       <Td align="center" className="tabular-nums text-slate-500">
                         {lineNumbers[index] ?? ""}
                       </Td>
 
-                      <Td className={cn("min-w-48 text-slate-900", isHeader && "font-semibold")}>
+                      <Td className="min-w-48 text-slate-900">
                         {/* SUB lines are indented under their heading. The padding is on the inner
                             block because the table's [&_td]:px-3 wins over a padding class on the cell. */}
                         <div className={cn("whitespace-pre-line", lineType === "SUB" && "pl-5")}>
@@ -356,7 +357,7 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
                         </div>
                       </Td>
 
-                      {isHeader ? (
+                      {textOnly ? (
                         <>
                           <Td />
                           <Td />

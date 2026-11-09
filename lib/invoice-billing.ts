@@ -9,10 +9,12 @@
  *    "TC 2026/001-00{sub}".
  *  - Quantities are billed per PO line; cancelled invoices do not count. A line can never be
  *    billed for more than its PO quantity.
+ *  - Lines without a unit price are text only (headings, notes): they are not billed by quantity
+ *    and can be printed on every sub-invoice.
  */
 import type { Prisma } from "@/generated/prisma/client";
 import { defaultSaleOrderNumber, formatInvoiceNumber, invoiceYearPrefix, remainingQuantity } from "@/lib/invoices";
-import { lineHasAmount, toLineType } from "@/lib/lines";
+import { lineHasAmount, toLineType, type LineType } from "@/lib/lines";
 import { toNumber } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 
@@ -95,7 +97,7 @@ export async function nextInvoiceNumber(tx: Prisma.TransactionClient, invoiceDat
 export type BillingLine = {
   id: string;
   itemNo: number;
-  lineType: "ITEM" | "HEADER" | "SUB";
+  lineType: LineType;
   description: string;
   quantity: number;
   unit: string | null;
@@ -115,29 +117,30 @@ export async function billingLines(db: Db, purchaseOrderId: string): Promise<Bil
   ]);
 
   return items.map((item) => {
-    const lineType = toLineType(item.lineType);
     const quantity = toNumber(item.quantity);
+    const unitPrice = toNumber(item.unitPrice);
     const done = billed.get(item.id) ?? 0;
     return {
       id: item.id,
       itemNo: item.itemNo,
-      lineType,
+      lineType: toLineType(item.lineType),
       description: item.description,
       quantity,
       unit: item.unit,
-      unitPrice: toNumber(item.unitPrice),
+      unitPrice,
       discount: toNumber(item.discount),
       discountType: item.discountType,
       vat: toNumber(item.vat),
       billed: done,
-      remaining: lineHasAmount(lineType) ? remainingQuantity(quantity, done) : 0,
+      // text lines (no price) have nothing to bill
+      remaining: lineHasAmount({ unitPrice }) ? remainingQuantity(quantity, done) : 0,
     };
   });
 }
 
 /** True when at least one priced line still has something to bill. */
 export function hasUnbilled(lines: BillingLine[]) {
-  return lines.some((line) => lineHasAmount(line.lineType) && line.remaining > 0);
+  return lines.some((line) => lineHasAmount(line) && line.remaining > 0);
 }
 
 export { defaultSaleOrderNumber };

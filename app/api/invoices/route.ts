@@ -26,7 +26,7 @@ import {
 } from "@/lib/invoice-billing";
 import { buildInvoiceLines, defaultSaleOrderNumber } from "@/lib/invoices";
 import { isDocumentType } from "@/lib/labels";
-import { lineHasAmount } from "@/lib/lines";
+import { defaultSelectedLines, lineHasAmount } from "@/lib/lines";
 import { parseDiscount, parseNumber, type Numeric } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 
@@ -42,29 +42,14 @@ function hasAtMost4Decimals(value: number) {
   return Number.isFinite(shifted) && Math.abs(shifted - Math.round(shifted)) < 1e-6;
 }
 
-/** Headings are kept when at least one of the lines below them (up to the next heading) is billed. */
-function withHeadings(lines: BillingLine[], chosen: Set<string>): Set<string> {
-  const result = new Set(chosen);
-  lines.forEach((line, index) => {
-    if (line.lineType !== "HEADER") return;
-    for (let i = index + 1; i < lines.length && lines[i].lineType !== "HEADER"; i++) {
-      if (chosen.has(lines[i].id)) {
-        result.add(line.id);
-        return;
-      }
-    }
-  });
-  return result;
-}
-
 /** The lines to bill: what the client chose, or everything still unbilled. */
 function selectLines(lines: BillingLine[], rawItems: unknown): { line: BillingLine; quantity: number }[] {
   const byId = new Map(lines.map((line) => [line.id, line]));
 
   if (rawItems === undefined) {
-    const chosen = new Set(lines.filter((l) => lineHasAmount(l.lineType) && l.remaining > 0).map((l) => l.id));
-    const keep = withHeadings(lines, chosen);
-    return lines.filter((l) => keep.has(l.id)).map((line) => ({ line, quantity: line.remaining }));
+    // Same default as the create form: everything still unbilled, with the text lines of its groups
+    const selected = defaultSelectedLines(lines);
+    return lines.filter((_, index) => selected[index]).map((line) => ({ line, quantity: line.remaining }));
   }
 
   if (!Array.isArray(rawItems)) {
@@ -81,7 +66,8 @@ function selectLines(lines: BillingLine[], rawItems: unknown): { line: BillingLi
 
     const label = `รายการ "${line.description}"`;
 
-    if (!lineHasAmount(line.lineType)) {
+    // text line (no price): printed only, not billed by quantity
+    if (!lineHasAmount(line)) {
       quantities.set(id, 0);
       continue;
     }
@@ -99,7 +85,7 @@ function selectLines(lines: BillingLine[], rawItems: unknown): { line: BillingLi
   }
 
   const selected = lines.filter((line) => quantities.has(line.id));
-  if (!selected.some((line) => lineHasAmount(line.lineType))) {
+  if (!selected.some((line) => lineHasAmount(line))) {
     throw new ApiError(400, "กรุณาเลือกรายการที่จะเรียกเก็บอย่างน้อย 1 รายการ");
   }
 
@@ -237,7 +223,7 @@ export async function POST(request: Request) {
                 description: line.description,
                 quantity,
                 unit: line.unit,
-                unitPrice: lineHasAmount(line.lineType) ? line.unitPrice : 0,
+                unitPrice: line.unitPrice,
                 discount: lineDiscount,
                 discountType,
                 amount,

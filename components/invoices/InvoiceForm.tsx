@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { LoaderCircle, Save } from "lucide-react";
@@ -15,13 +15,13 @@ import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { formatMoney, todayInputValue } from "@/lib/format";
 import { buildInvoiceLines, defaultSaleOrderNumber, formatLineDiscount, formatQuantity } from "@/lib/invoices";
 import { DOCUMENT_TYPES } from "@/lib/labels";
-import { displayLineDescription, displayLineNumbers, lineHasAmount } from "@/lib/lines";
+import { defaultSelectedLines, displayLineDescription, displayLineNumbers, lineHasAmount, type LineType } from "@/lib/lines";
 import { parseDiscount, parseNumber, type ParsedDiscount } from "@/lib/money";
 
 type BillingLine = {
   id: string;
   itemNo: number;
-  lineType: "ITEM" | "HEADER" | "SUB";
+  lineType: LineType;
   description: string;
   quantity: number;
   unit: string | null;
@@ -58,16 +58,48 @@ type InvoiceInitialData = {
 type LineState = { selected: boolean; quantity: string };
 
 function initialLineState(lines: BillingLine[]): Record<string, LineState> {
+  // everything still unbilled is selected by default; text lines follow the lines of their group
+  const selected = defaultSelectedLines(lines);
   return Object.fromEntries(
-    lines.map((line) => [
+    lines.map((line, index) => [
       line.id,
       {
-        // everything still unbilled is selected by default; headings follow their lines
-        selected: lineHasAmount(line.lineType) ? line.remaining > 0 : true,
-        quantity: lineHasAmount(line.lineType) ? String(line.remaining) : "",
+        selected: selected[index],
+        quantity: lineHasAmount(line) ? String(line.remaining) : "",
       },
     ])
   );
+}
+
+type SaleOrderMatch = { id: string; invoiceNumber: string; subNumber: number; saleOrderNumber: string };
+
+/** Other invoices that already use this Sale Order No. (duplicates are allowed, only warned about). */
+function useSaleOrderDuplicates(value: string): SaleOrderMatch[] {
+  const [result, setResult] = useState<{ value: string; matches: SaleOrderMatch[] }>({ value: "", matches: [] });
+  const query = value.trim();
+
+  useEffect(() => {
+    if (!query) return;
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/invoices/sale-orders?number=${encodeURIComponent(query)}`, {
+          signal: controller.signal,
+        });
+        const data: { matches?: SaleOrderMatch[] } = await response.json();
+        setResult({ value: query, matches: response.ok && Array.isArray(data.matches) ? data.matches : [] });
+      } catch {
+        // offline or aborted: no warning (saving is allowed either way)
+      }
+    }, 300);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query]);
+
+  // results of an older value never show for the current one
+  return query && result.value === query ? result.matches : [];
 }
 
 export default function InvoiceForm({ initialData }: { initialData: InvoiceInitialData }) {
@@ -100,6 +132,7 @@ export default function InvoiceForm({ initialData }: { initialData: InvoiceIniti
   const numbers = useMemo(() => displayLineNumbers(lines), [lines]);
   const defaultSaleOrder = defaultSaleOrderNumber(invoiceNumber, initialData.subNumber);
   const saleOrderValue = saleOrderNumber ?? defaultSaleOrder;
+  const saleOrderDuplicates = useSaleOrderDuplicates(saleOrderValue);
 
   // ---------------------------------------------------------------- selection and preview
 
@@ -110,7 +143,7 @@ export default function InvoiceForm({ initialData }: { initialData: InvoiceIniti
     const state = lineState[line.id];
     if (!state?.selected) continue;
 
-    if (!lineHasAmount(line.lineType)) {
+    if (!lineHasAmount(line)) {
       selection.push({ line, quantity: 0, billedBefore: 0 });
       continue;
     }
@@ -140,7 +173,7 @@ export default function InvoiceForm({ initialData }: { initialData: InvoiceIniti
   );
   const amountById = new Map(previewLines.map((p) => [p.line.id, p.amount]));
 
-  const hasPricedSelection = selection.some(({ line }) => lineHasAmount(line.lineType));
+  const hasPricedSelection = selection.some(({ line }) => lineHasAmount(line));
   const canSubmit =
     hasPricedSelection && Object.keys(lineErrors).length === 0 && !discountError && !submitting;
 
@@ -240,13 +273,35 @@ export default function InvoiceForm({ initialData }: { initialData: InvoiceIniti
             />
           </Field>
 
-          <Field label="Sale Order No." htmlFor="invoice-sale-order" hint="ค่าเริ่มต้น TC ปี/เลข-ลำดับใบย่อย" className="min-w-0">
+          <Field
+            label="Sale Order No."
+            htmlFor="invoice-sale-order"
+            hint={saleOrderDuplicates.length > 0 ? undefined : "ค่าเริ่มต้น TC ปี/เลข-ลำดับใบย่อย แก้ไขได้"}
+            className="min-w-0"
+          >
             <Input
               id="invoice-sale-order"
               type="text"
               value={saleOrderValue}
               onChange={(event) => setSaleOrderNumber(event.target.value)}
+              aria-describedby={saleOrderDuplicates.length > 0 ? "invoice-sale-order-duplicate" : undefined}
+              className={cn(saleOrderDuplicates.length > 0 && "border-amber-400 focus-visible:ring-amber-100")}
             />
+            {saleOrderDuplicates.length > 0 && (
+              <p id="invoice-sale-order-duplicate" role="status" className="mt-1.5 text-xs leading-5 text-amber-700">
+                Sale Order No. นี้ซ้ำกับ{" "}
+                {saleOrderDuplicates.slice(0, 3).map((match, index) => (
+                  <span key={match.id}>
+                    {index > 0 && ", "}
+                    <Link href={`/invoices/${match.id}`} target="_blank" className="font-medium underline underline-offset-2">
+                      {match.invoiceNumber}
+                      {match.subNumber > 1 ? ` (ใบย่อยที่ ${match.subNumber})` : ""}
+                    </Link>
+                  </span>
+                ))}
+                {saleOrderDuplicates.length > 3 && ` และอีก ${saleOrderDuplicates.length - 3} ใบ`} — ถ้าตั้งใจใช้เลขซ้ำ บันทึกต่อได้เลย
+              </p>
+            )}
           </Field>
 
           <Field label="ประเภทเอกสาร" htmlFor="invoice-document-type" className="min-w-0 sm:col-span-2">
@@ -398,12 +453,11 @@ export default function InvoiceForm({ initialData }: { initialData: InvoiceIniti
             <tbody>
               {lines.map((line, index) => {
                 const state = lineState[line.id];
-                const priced = lineHasAmount(line.lineType);
+                const priced = lineHasAmount(line);
                 const done = priced && line.remaining <= 0;
-                const isHeader = line.lineType === "HEADER";
 
                 return (
-                  <tr key={line.id} className={cn(done && "bg-slate-50 text-slate-400", isHeader && "bg-slate-50/60")}>
+                  <tr key={line.id} className={cn(done && "bg-slate-50 text-slate-400")}>
                     <td className={cn(td, "pl-5 pt-3 text-center")}>
                       <input
                         type="checkbox"
@@ -415,7 +469,7 @@ export default function InvoiceForm({ initialData }: { initialData: InvoiceIniti
                       />
                     </td>
                     <td className={cn(td, "pt-3 text-center tabular-nums text-slate-500")}>{numbers[index] ?? ""}</td>
-                    <td className={cn(td, "pt-3", line.lineType === "SUB" && "pl-8", isHeader && "font-semibold text-slate-900")}>
+                    <td className={cn(td, "pt-3", line.lineType === "SUB" && "pl-8")}>
                       <span className="whitespace-pre-line">{displayLineDescription(line.description, line.lineType)}</span>
                       {done && <span className="ml-2 text-xs">(เรียกเก็บครบแล้ว)</span>}
                     </td>

@@ -76,7 +76,7 @@ export default async function PurchaseOrderDetailPage({ params }: Props) {
 
   // One PO = one invoice number, billed in parts as sub-invoices (ใบย่อย 1, 2, 3 ...)
   const isCancelled = purchaseOrder.status === "CANCELLED";
-  const hasPricedLines = lines.some((line) => lineHasAmount(line.lineType));
+  const hasPricedLines = lines.some((line) => lineHasAmount(line));
   const unbilled = hasUnbilled(lines);
   const canCreateInvoice = !isCancelled && unbilled;
   const fullyBilled = hasPricedLines && !unbilled;
@@ -167,17 +167,17 @@ export default async function PurchaseOrderDetailPage({ params }: Props) {
                   const lineType = toLineType(item.lineType);
                   const description = displayLineDescription(item.description, lineType);
 
-                  // Heading: number and bold description only
-                  if (!lineHasAmount(lineType)) {
+                  // Text line (no price, e.g. a heading): number and description only
+                  if (!lineHasAmount(item)) {
                     return (
-                      <Tr key={item.id} className="bg-slate-50/60">
+                      <Tr key={item.id}>
                         <Td align="center" className="tabular-nums text-slate-400">
-                          {numbers[index]}
+                          {numbers[index] ?? ""}
                         </Td>
 
                         <Td
                           colSpan={ITEM_COLUMNS_AFTER_NUMBER}
-                          className="min-w-48 whitespace-pre-line font-semibold text-slate-900"
+                          className={cn("min-w-48 whitespace-pre-line text-slate-900", lineType === "SUB" && "pl-10 text-slate-700")}
                         >
                           {description}
                         </Td>

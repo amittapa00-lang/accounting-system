@@ -145,7 +145,7 @@ export async function GET(_request: Request, { params }: RouteContext) {
     // รายการสินค้า
     // =====================================
 
-    // ITEM and HEADER lines are numbered 1, 2, ...; SUB lines have no number and start with "- "
+    // ITEM lines are numbered 1, 2, ...; SUB lines have no number and start with "- "
     const lineNumbers = displayLineNumbers(invoice.items);
 
     invoice.items.forEach((item, index) => {
@@ -156,15 +156,12 @@ export async function GET(_request: Request, { params }: RouteContext) {
 
       const descriptionCell = ownStyle(worksheet.getCell(`C${row}`));
       descriptionCell.value = displayLineDescription(item.description, lineType);
-      if (lineType === "HEADER") {
-        descriptionCell.font = { ...descriptionCell.font, bold: true };
-      }
       if (lineType === "SUB") {
         descriptionCell.alignment = { ...descriptionCell.alignment, indent: 1 };
       }
 
-      // HEADER lines are headings only: no quantity, unit, price, discount or amount
-      if (!lineHasAmount(lineType)) return;
+      // A line without price is text only: no quantity, unit, price, discount or amount
+      if (!lineHasAmount(item)) return;
 
       const quantity = toNumber(item.quantity);
       const unitPrice = toNumber(item.unitPrice);
