@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ClipboardList, Plus, Receipt, Wallet } from "lucide-react";
+import { ClipboardList, FilePlus2, Plus, Receipt, Wallet } from "lucide-react";
 
 import { Badge, InvoiceStatusBadge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
@@ -11,10 +11,12 @@ import { Alert, EmptyState } from "@/components/ui/feedback";
 import { PageHeader } from "@/components/ui/page-header";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageSession } from "@/lib/auth";
-import { formatDate, formatMoney } from "@/lib/format";
+import { formatDate, formatMoney, formatPercent } from "@/lib/format";
+import { billingLines, hasUnbilled, invoiceGroupOf } from "@/lib/invoice-billing";
 import { formatLineDiscount, formatQuantity, isBilledInvoiceStatus, isInvoiceOverdue } from "@/lib/invoices";
 import { documentTypeLabel, OPEN_INVOICE_STATUSES, paymentMethodLabel, type Tone } from "@/lib/labels";
-import { paymentSummary, toNumber } from "@/lib/money";
+import { displayLineDescription, displayLineNumbers, lineHasAmount, toLineType } from "@/lib/lines";
+import { paymentSummary, sumMoney, toNumber } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 
 import DraftInvoiceActions from "@/components/invoices/DraftInvoiceActions";
@@ -43,6 +45,7 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
           id: true,
           poNumber: true,
           poDate: true,
+          status: true,
           billPlacement: true,
           contactPhone: true,
           contactMobile: true,
@@ -66,6 +69,59 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
   if (!invoice) {
     notFound();
   }
+
+  const purchaseOrderId = invoice.purchaseOrder.id;
+  const isPoCancelled = invoice.purchaseOrder.status === "CANCELLED";
+
+  // ==========================================
+  // ใบย่อย: ทุกใบของ PO นี้ที่ใช้เลข Invoice เดียวกัน (IV2026/001 ใบย่อยที่ 1, 2, 3 ...)
+  // ==========================================
+
+  const [subInvoices, group, poLines] = await Promise.all([
+    prisma.invoice.findMany({
+      where: { purchaseOrderId, invoiceNumber: invoice.invoiceNumber },
+      orderBy: { subNumber: "asc" },
+      select: {
+        id: true,
+        subNumber: true,
+        saleOrderNumber: true,
+        invoiceDate: true,
+        status: true,
+        grandTotal: true,
+      },
+    }),
+    invoiceGroupOf(prisma, purchaseOrderId),
+    isPoCancelled ? Promise.resolve([]) : billingLines(prisma, purchaseOrderId),
+  ]);
+
+  const hasSubInvoices = subInvoices.length > 1 || invoice.subNumber > 1;
+
+  // ใบย่อยถัดไปจะใช้เลขของกลุ่มล่าสุดของ PO จึงแสดงปุ่มเฉพาะในกลุ่มนั้น
+  const canCreateNextSub =
+    !isPoCancelled && group?.invoiceNumber === invoice.invoiceNumber && hasUnbilled(poLines);
+
+  const subInvoicesTotal = sumMoney(
+    subInvoices.filter((sub) => sub.status !== "CANCELLED").map((sub) => sub.grandTotal)
+  );
+
+  // ==========================================
+  // รายการ: ลำดับที่แสดง (ITEM/HEADER มีเลข, SUB ไม่มี) และยอดรวมก่อนส่วนลดท้ายบิล
+  // ==========================================
+
+  const lineNumbers = displayLineNumbers(invoice.items);
+
+  const itemsTotal = sumMoney(
+    invoice.items.filter((item) => lineHasAmount(item.lineType)).map((item) => item.amount)
+  );
+
+  const billDiscountAmount = toNumber(invoice.billDiscountAmount);
+
+  const billDiscountLabel =
+    invoice.billDiscountType === "PERCENT" && formatPercent(invoice.billDiscount)
+      ? `ส่วนลดท้ายบิล (${formatPercent(invoice.billDiscount)})`
+      : "ส่วนลดท้ายบิล";
+
+  const note = invoice.note?.trim() ?? "";
 
   // ==========================================
   // ยอดรับชำระ (คำนวณเป็นสตางค์ ไม่มีเศษทศนิยมคลาดเคลื่อน)
@@ -110,6 +166,12 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
         back={{ href: "/invoices", label: "Invoice ทั้งหมด" }}
         meta={
           <>
+            {hasSubInvoices && <Badge tone="brand">ใบย่อยที่ {invoice.subNumber}</Badge>}
+            {invoice.saleOrderNumber && (
+              <span className="text-sm text-slate-500">
+                Sale Order No. <span className="font-medium text-slate-700">{invoice.saleOrderNumber}</span>
+              </span>
+            )}
             <InvoiceStatusBadge status={invoice.status} />
             {isInvoiceOverdue(invoice.status, invoice.dueDate) && <Badge tone="danger">เกินกำหนดชำระ</Badge>}
             <Badge tone={isBilled ? "success" : "neutral"}>{isBilled ? "วางบิลแล้ว" : "ยังไม่วางบิล"}</Badge>
@@ -121,6 +183,12 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
             <ButtonLink href={`/purchase-orders/${invoice.purchaseOrder.id}`} variant="outline">
               <ClipboardList /> ดู Purchase Order
             </ButtonLink>
+
+            {canCreateNextSub && (
+              <ButtonLink href={`/invoices/new?purchaseOrderId=${purchaseOrderId}`} variant="outline">
+                <FilePlus2 /> สร้างใบย่อยถัดไป
+              </ButtonLink>
+            )}
 
             {invoice.status === "DRAFT" && <DraftInvoiceActions invoiceId={invoice.id} />}
 
@@ -153,7 +221,10 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
               <DetailList
                 className="min-w-0"
                 items={[
-                  { label: "Invoice No.", value: invoice.invoiceNumber },
+                  {
+                    label: "Invoice No.",
+                    value: hasSubInvoices ? `${invoice.invoiceNumber} (ใบย่อยที่ ${invoice.subNumber})` : invoice.invoiceNumber,
+                  },
                   { label: "ประเภทเอกสาร", value: documentTypeLabel(invoice.documentType) },
                   {
                     label: "Purchase Order",
@@ -181,6 +252,73 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
             </CardBody>
           </Card>
 
+          {/* Sub-invoices sharing this invoice number */}
+          {subInvoices.length > 1 && (
+            <Card>
+              <CardHeader
+                title={`ใบย่อยของ Invoice ${invoice.invoiceNumber}`}
+                description={`${subInvoices.length} ใบ · รวม ${formatMoney(subInvoicesTotal)} บาท (ไม่รวมที่ยกเลิก)`}
+              />
+
+              <ul className="divide-y divide-slate-100">
+                {subInvoices.map((sub) => {
+                  const isCurrent = sub.id === invoice.id;
+                  const label = sub.saleOrderNumber || `${invoice.invoiceNumber} ใบย่อยที่ ${sub.subNumber}`;
+
+                  const content = (
+                    <>
+                      <div className="min-w-0">
+                        <p
+                          className={cn(
+                            "truncate text-sm font-medium",
+                            isCurrent ? "text-brand-700" : "text-slate-900 group-hover:text-brand-700"
+                          )}
+                        >
+                          {label}
+                          {isCurrent && <span className="ml-2 text-xs font-normal text-brand-600">(ใบนี้)</span>}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          ใบย่อยที่ {sub.subNumber} · {formatDate(sub.invoiceDate)}
+                        </p>
+                      </div>
+
+                      <div className="flex shrink-0 items-center gap-3">
+                        <InvoiceStatusBadge status={sub.status} />
+                        <span
+                          className={cn(
+                            "w-28 text-right text-sm font-semibold tabular-nums",
+                            sub.status === "CANCELLED" ? "text-slate-400 line-through" : "text-slate-900"
+                          )}
+                        >
+                          {formatMoney(sub.grandTotal)}
+                        </span>
+                      </div>
+                    </>
+                  );
+
+                  const rowClass = "flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 px-5 py-2.5";
+
+                  return (
+                    <li key={sub.id}>
+                      {isCurrent ? (
+                        <div aria-current="page" className={cn(rowClass, "border-l-2 border-brand-500 bg-brand-50/60 pl-[18px]")}>
+                          {content}
+                        </div>
+                      ) : (
+                        <Link
+                          href={`/invoices/${sub.id}`}
+                          className={cn(rowClass, "group transition-colors hover:bg-slate-50")}
+                        >
+                          {content}
+                        </Link>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </Card>
+          )}
+
           {/* Items */}
           <Card>
             <CardHeader title="รายการสินค้า" description={`${invoice.items.length} รายการ`} />
@@ -200,35 +338,64 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
               </thead>
 
               <tbody>
-                {invoice.items.map((item) => (
-                  <Tr key={item.id}>
-                    <Td align="center" className="text-slate-500">
-                      {item.itemNo}
-                    </Td>
+                {invoice.items.map((item, index) => {
+                  const lineType = toLineType(item.lineType);
+                  const isHeader = lineType === "HEADER";
 
-                    <Td className="min-w-48 whitespace-pre-line text-slate-900">{item.description}</Td>
+                  return (
+                    <Tr key={item.id} className={cn(isHeader && "bg-slate-50/60")}>
+                      <Td align="center" className="tabular-nums text-slate-500">
+                        {lineNumbers[index] ?? ""}
+                      </Td>
 
-                    <Td align="right" className="tabular-nums">
-                      {formatQuantity(item.quantity)}
-                    </Td>
+                      <Td className={cn("min-w-48 text-slate-900", isHeader && "font-semibold")}>
+                        {/* SUB lines are indented under their heading. The padding is on the inner
+                            block because the table's [&_td]:px-3 wins over a padding class on the cell. */}
+                        <div className={cn("whitespace-pre-line", lineType === "SUB" && "pl-5")}>
+                          {displayLineDescription(item.description, lineType)}
+                        </div>
+                      </Td>
 
-                    <Td>{item.unit || "-"}</Td>
+                      {isHeader ? (
+                        <>
+                          <Td />
+                          <Td />
+                          <Td />
+                          <Td />
+                          <Td />
+                        </>
+                      ) : (
+                        <>
+                          <Td align="right" className="tabular-nums">
+                            {formatQuantity(item.quantity)}
+                          </Td>
 
-                    <Td align="right" className="tabular-nums">
-                      {formatMoney(item.unitPrice)}
-                    </Td>
+                          <Td>{item.unit || "-"}</Td>
 
-                    <Td align="right" className="tabular-nums">
-                      {formatLineDiscount(item.discount, item.discountType) || "-"}
-                    </Td>
+                          <Td align="right" className="tabular-nums">
+                            {formatMoney(item.unitPrice)}
+                          </Td>
 
-                    <Td align="right" className="font-medium tabular-nums text-slate-900">
-                      {formatMoney(item.amount)}
-                    </Td>
-                  </Tr>
-                ))}
+                          <Td align="right" className="tabular-nums">
+                            {formatLineDiscount(item.discount, item.discountType) || "-"}
+                          </Td>
+
+                          <Td align="right" className="font-medium tabular-nums text-slate-900">
+                            {formatMoney(item.amount)}
+                          </Td>
+                        </>
+                      )}
+                    </Tr>
+                  );
+                })}
               </tbody>
             </Table>
+
+            {note && (
+              <CardBody className="border-t border-slate-100 py-4">
+                <DetailBlock label="หมายเหตุ">{note}</DetailBlock>
+              </CardBody>
+            )}
           </Card>
 
           {/* Purchase Order contact and conditions */}
@@ -275,6 +442,18 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
 
             <CardBody className="space-y-5">
               <dl className="space-y-2 text-sm">
+                <div className="flex justify-between gap-4">
+                  <dt className="text-slate-500">รวมรายการ</dt>
+                  <dd className="tabular-nums text-slate-900">{formatMoney(itemsTotal)} บาท</dd>
+                </div>
+
+                {billDiscountAmount > 0 && (
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-slate-500">{billDiscountLabel}</dt>
+                    <dd className="tabular-nums text-red-600">-{formatMoney(billDiscountAmount)} บาท</dd>
+                  </div>
+                )}
+
                 <div className="flex justify-between gap-4">
                   <dt className="text-slate-500">Subtotal</dt>
                   <dd className="tabular-nums text-slate-900">{formatMoney(invoice.subtotal)} บาท</dd>

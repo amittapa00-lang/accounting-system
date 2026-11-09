@@ -1,19 +1,21 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { FilePlus2, FileText, Pencil } from "lucide-react";
+import { CheckCircle2, FilePlus2, FileText, Pencil } from "lucide-react";
 
 import { InvoiceStatusBadge, PoStatusBadge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { cn } from "@/components/ui/cn";
 import { DetailBlock, DetailList } from "@/components/ui/data-display";
 import { Alert, EmptyState } from "@/components/ui/feedback";
 import { PageHeader } from "@/components/ui/page-header";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageSession } from "@/lib/auth";
 import { formatDate, formatMoney, formatPercent } from "@/lib/format";
+import { billingLines, hasUnbilled, invoiceGroupOf } from "@/lib/invoice-billing";
 import { formatLineDiscount, formatQuantity } from "@/lib/invoices";
-import { documentTypeLabel } from "@/lib/labels";
-import { calcTotals } from "@/lib/money";
+import { displayLineDescription, displayLineNumbers, lineHasAmount, toLineType } from "@/lib/lines";
+import { calcTotals, sumMoney } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 
 export const instant = false;
@@ -24,47 +26,80 @@ type Props = {
   }>;
 };
 
+/** Columns of the items table after "#" (a heading's description spans all of them). */
+const ITEM_COLUMNS_AFTER_NUMBER = 7;
+
 export default async function PurchaseOrderDetailPage({ params }: Props) {
   await requirePageSession();
 
   const { id } = await params;
 
-  const purchaseOrder = await prisma.purchaseOrder.findUnique({
-    where: {
-      id,
-    },
-    include: {
-      customer: true,
-      items: {
-        orderBy: {
-          itemNo: "asc",
+  const [purchaseOrder, lines, group] = await Promise.all([
+    prisma.purchaseOrder.findUnique({
+      where: {
+        id,
+      },
+      include: {
+        customer: true,
+        items: {
+          orderBy: {
+            itemNo: "asc",
+          },
+        },
+        invoices: {
+          select: {
+            id: true,
+            invoiceNumber: true,
+            subNumber: true,
+            saleOrderNumber: true,
+            invoiceDate: true,
+            grandTotal: true,
+            status: true,
+          },
+          orderBy: [{ createdAt: "asc" }, { subNumber: "asc" }],
         },
       },
-      invoices: {
-        select: {
-          id: true,
-          invoiceNumber: true,
-          invoiceDate: true,
-          documentType: true,
-          grandTotal: true,
-          status: true,
-        },
-        orderBy: {
-          invoiceDate: "desc",
-        },
-      },
-    },
-  });
+    }),
+    billingLines(prisma, id),
+    invoiceGroupOf(prisma, id),
+  ]);
 
   if (!purchaseOrder) {
     notFound();
   }
 
   const { subtotal, vat, grandTotal } = calcTotals(purchaseOrder.items);
+  const numbers = displayLineNumbers(purchaseOrder.items);
+  const billingById = new Map(lines.map((line) => [line.id, line]));
+  // Billed / remaining per line is shown once something has been billed (before that, everything remains)
+  const billingStarted = lines.some((line) => line.billed > 0);
 
-  // 1 PO = 1 Invoice: a cancelled invoice frees the PO for a new one
-  const activeInvoice = purchaseOrder.invoices.find((invoice) => invoice.status !== "CANCELLED");
-  const canCreateInvoice = !activeInvoice && purchaseOrder.status !== "CANCELLED";
+  // One PO = one invoice number, billed in parts as sub-invoices (ใบย่อย 1, 2, 3 ...)
+  const isCancelled = purchaseOrder.status === "CANCELLED";
+  const hasPricedLines = lines.some((line) => lineHasAmount(line.lineType));
+  const unbilled = hasUnbilled(lines);
+  const canCreateInvoice = !isCancelled && unbilled;
+  const fullyBilled = hasPricedLines && !unbilled;
+
+  const createHref = `/invoices/new?purchaseOrderId=${purchaseOrder.id}`;
+  const createLabel = group ? `สร้างใบย่อยถัดไป (ใบที่ ${group.nextSubNumber})` : "สร้าง Invoice จาก PO";
+
+  const activeInvoices = purchaseOrder.invoices.filter((invoice) => invoice.status !== "CANCELLED");
+  const activeTotal = sumMoney(activeInvoices.map((invoice) => invoice.grandTotal));
+  const cancelledCount = purchaseOrder.invoices.length - activeInvoices.length;
+
+  // "Invoice No. IV2026/001 · 2 ใบ · ยกเลิก 1 ใบ · ยอดรวม 1,000.00" (the total leaves out cancelled ones)
+  const invoiceSummary =
+    purchaseOrder.invoices.length > 0
+      ? [
+          group && `Invoice No. ${group.invoiceNumber}`,
+          `${activeInvoices.length} ใบ`,
+          cancelledCount > 0 && `ยกเลิก ${cancelledCount} ใบ`,
+          `ยอดรวม ${formatMoney(activeTotal)}`,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : undefined;
 
   return (
     <>
@@ -79,32 +114,28 @@ export default async function PurchaseOrderDetailPage({ params }: Props) {
               <Pencil /> แก้ไข PO
             </ButtonLink>
 
-            {activeInvoice && (
-              <ButtonLink href={`/invoices/${activeInvoice.id}`} variant="primary">
-                <FileText /> ดู Invoice {activeInvoice.invoiceNumber}
-              </ButtonLink>
-            )}
-
             {canCreateInvoice && (
-              <ButtonLink href={`/invoices/new?purchaseOrderId=${purchaseOrder.id}`} variant="brand">
-                <FilePlus2 /> สร้าง Invoice จาก PO
+              <ButtonLink href={createHref} variant="brand">
+                <FilePlus2 /> {createLabel}
               </ButtonLink>
             )}
           </>
         }
       />
 
-      {activeInvoice ? (
-        <Alert tone="info" title="PO นี้มี Invoice แล้ว" className="mb-6">
-          <Link href={`/invoices/${activeInvoice.id}`} className="font-medium underline underline-offset-2">
-            Invoice {activeInvoice.invoiceNumber}
-          </Link>{" "}
-          สร้างจาก PO นี้แล้ว (1 PO ออก Invoice ได้ 1 ใบ) หากต้องการออกใหม่ ให้ยกเลิก Invoice เดิมก่อน
+      {isCancelled ? (
+        <Alert tone="warning" title="PO นี้ถูกยกเลิกแล้ว" className="mb-6">
+          จึงสร้าง Invoice จาก PO นี้ไม่ได้
+        </Alert>
+      ) : fullyBilled ? (
+        <Alert tone="info" title="ออก Invoice ครบทุกรายการแล้ว" className="mb-6">
+          ทุกรายการใน PO นี้ถูกเรียกเก็บแล้ว
+          {group && ` ใน Invoice ${group.invoiceNumber} (${activeInvoices.length} ใบ)`}
         </Alert>
       ) : (
-        purchaseOrder.status === "CANCELLED" && (
-          <Alert tone="warning" title="PO นี้ถูกยกเลิกแล้ว" className="mb-6">
-            จึงสร้าง Invoice จาก PO นี้ไม่ได้
+        !hasPricedLines && (
+          <Alert tone="warning" title="PO นี้ยังไม่มีรายการที่มีราคา" className="mb-6">
+            เพิ่มรายการประเภท &quot;รายการ&quot; หรือ &quot;ย่อย&quot; ก่อน จึงจะสร้าง Invoice ได้
           </Alert>
         )
       )}
@@ -132,39 +163,92 @@ export default async function PurchaseOrderDetailPage({ params }: Props) {
               </thead>
 
               <tbody>
-                {purchaseOrder.items.map((item) => (
-                  <Tr key={item.id}>
-                    <Td align="center" className="tabular-nums text-slate-400">
-                      {item.itemNo}
-                    </Td>
+                {purchaseOrder.items.map((item, index) => {
+                  const lineType = toLineType(item.lineType);
+                  const description = displayLineDescription(item.description, lineType);
 
-                    <Td className="min-w-56 text-slate-900">{item.description}</Td>
+                  // Heading: number and bold description only
+                  if (!lineHasAmount(lineType)) {
+                    return (
+                      <Tr key={item.id} className="bg-slate-50/60">
+                        <Td align="center" className="tabular-nums text-slate-400">
+                          {numbers[index]}
+                        </Td>
 
-                    <Td align="right" className="whitespace-nowrap tabular-nums">
-                      {formatQuantity(item.quantity)}
-                    </Td>
+                        <Td
+                          colSpan={ITEM_COLUMNS_AFTER_NUMBER}
+                          className="min-w-48 whitespace-pre-line font-semibold text-slate-900"
+                        >
+                          {description}
+                        </Td>
+                      </Tr>
+                    );
+                  }
 
-                    <Td align="center" className="whitespace-nowrap">
-                      {item.unit || "-"}
-                    </Td>
+                  const billing = billingById.get(item.id);
+                  const done = billing !== undefined && billing.remaining <= 0;
 
-                    <Td align="right" className="whitespace-nowrap tabular-nums">
-                      {formatMoney(item.unitPrice)}
-                    </Td>
+                  return (
+                    <Tr key={item.id}>
+                      <Td align="center" className="tabular-nums text-slate-400">
+                        {numbers[index] ?? ""}
+                      </Td>
 
-                    <Td align="right" className="whitespace-nowrap tabular-nums">
-                      {formatLineDiscount(item.discount, item.discountType) || "-"}
-                    </Td>
+                      <Td className={cn("min-w-48 text-slate-900", lineType === "SUB" && "pl-10 text-slate-700")}>
+                        <span className="whitespace-pre-line">{description}</span>
 
-                    <Td align="right" className="whitespace-nowrap tabular-nums">
-                      {formatPercent(item.vat) || "0%"}
-                    </Td>
+                        {/* Billing progress (under the description so the table stays narrow) */}
+                        {billingStarted && billing && (
+                          <span
+                            className={cn(
+                              "mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs tabular-nums",
+                              done ? "text-emerald-700" : "text-slate-500"
+                            )}
+                          >
+                            {done ? (
+                              <>
+                                <CheckCircle2 className="size-3.5" />
+                                เรียกเก็บครบแล้ว ({formatQuantity(billing.billed)} {item.unit ?? ""})
+                              </>
+                            ) : (
+                              <>
+                                <span>เรียกเก็บแล้ว {formatQuantity(billing.billed)}</span>
+                                <span aria-hidden="true">·</span>
+                                <span className="font-medium text-amber-700">
+                                  คงเหลือ {formatQuantity(billing.remaining)} {item.unit ?? ""}
+                                </span>
+                              </>
+                            )}
+                          </span>
+                        )}
+                      </Td>
 
-                    <Td align="right" className="whitespace-nowrap font-medium tabular-nums text-slate-900">
-                      {formatMoney(item.amount)}
-                    </Td>
-                  </Tr>
-                ))}
+                      <Td align="right" className="whitespace-nowrap tabular-nums">
+                        {formatQuantity(item.quantity)}
+                      </Td>
+
+                      <Td align="center" className="whitespace-nowrap">
+                        {item.unit || "-"}
+                      </Td>
+
+                      <Td align="right" className="whitespace-nowrap tabular-nums">
+                        {formatMoney(item.unitPrice)}
+                      </Td>
+
+                      <Td align="right" className="whitespace-nowrap tabular-nums">
+                        {formatLineDiscount(item.discount, item.discountType) || "-"}
+                      </Td>
+
+                      <Td align="right" className="whitespace-nowrap tabular-nums">
+                        {formatPercent(item.vat) || "0%"}
+                      </Td>
+
+                      <Td align="right" className="whitespace-nowrap font-medium tabular-nums text-slate-900">
+                        {formatMoney(item.amount)}
+                      </Td>
+                    </Tr>
+                  );
+                })}
               </tbody>
             </Table>
 
@@ -190,21 +274,29 @@ export default async function PurchaseOrderDetailPage({ params }: Props) {
           </Card>
 
           <Card>
-            <CardHeader title="Invoice ที่เกี่ยวข้อง" />
+            <CardHeader
+              title="Invoice ที่เกี่ยวข้อง"
+              description={invoiceSummary}
+              actions={
+                canCreateInvoice &&
+                purchaseOrder.invoices.length > 0 && (
+                  <ButtonLink href={createHref} variant="outline" size="sm">
+                    <FilePlus2 /> {createLabel}
+                  </ButtonLink>
+                )
+              }
+            />
 
             {purchaseOrder.invoices.length === 0 ? (
               <EmptyState
                 icon={FileText}
                 title="ยังไม่มี Invoice ที่สร้างจาก PO นี้"
+                description="PO หนึ่งใบใช้เลข Invoice เดียว และเรียกเก็บเป็นใบย่อยได้หลายครั้ง"
                 className="py-8"
                 action={
                   canCreateInvoice && (
-                    <ButtonLink
-                      href={`/invoices/new?purchaseOrderId=${purchaseOrder.id}`}
-                      variant="outline"
-                      size="sm"
-                    >
-                      <FilePlus2 /> สร้าง Invoice จาก PO
+                    <ButtonLink href={createHref} variant="outline" size="sm">
+                      <FilePlus2 /> {createLabel}
                     </ButtonLink>
                   )
                 }
@@ -214,38 +306,55 @@ export default async function PurchaseOrderDetailPage({ params }: Props) {
                 <thead>
                   <tr>
                     <Th>Invoice No.</Th>
+                    <Th>Sale Order No.</Th>
+                    <Th align="center">ใบย่อยที่</Th>
                     <Th>วันที่</Th>
-                    <Th>ประเภท</Th>
-                    <Th align="right">ยอดรวม</Th>
                     <Th>สถานะ</Th>
+                    <Th align="right">ยอดรวม</Th>
                   </tr>
                 </thead>
 
                 <tbody>
-                  {purchaseOrder.invoices.map((invoice) => (
-                    <Tr key={invoice.id}>
-                      <Td className="whitespace-nowrap">
-                        <Link
-                          href={`/invoices/${invoice.id}`}
-                          className="font-medium text-slate-900 hover:text-brand-700"
+                  {purchaseOrder.invoices.map((invoice) => {
+                    const cancelled = invoice.status === "CANCELLED";
+                    const muted = cancelled && "text-slate-400";
+
+                    return (
+                      <Tr key={invoice.id} className={cn(cancelled && "bg-slate-50/60")}>
+                        <Td className="whitespace-nowrap">
+                          <Link
+                            href={`/invoices/${invoice.id}`}
+                            aria-label={`Invoice ${invoice.invoiceNumber} ใบย่อยที่ ${invoice.subNumber}`}
+                            className={cn("font-medium text-slate-900 hover:text-brand-700", muted)}
+                          >
+                            {invoice.invoiceNumber}
+                          </Link>
+                        </Td>
+
+                        <Td className={cn("whitespace-nowrap", muted)}>{invoice.saleOrderNumber || "-"}</Td>
+
+                        <Td align="center" className={cn("tabular-nums", muted)}>
+                          {invoice.subNumber}
+                        </Td>
+
+                        <Td className={cn("whitespace-nowrap", muted)}>{formatDate(invoice.invoiceDate)}</Td>
+
+                        <Td>
+                          <InvoiceStatusBadge status={invoice.status} />
+                        </Td>
+
+                        <Td
+                          align="right"
+                          className={cn(
+                            "whitespace-nowrap font-medium tabular-nums text-slate-900",
+                            cancelled && "text-slate-400 line-through"
+                          )}
                         >
-                          {invoice.invoiceNumber}
-                        </Link>
-                      </Td>
-
-                      <Td className="whitespace-nowrap">{formatDate(invoice.invoiceDate)}</Td>
-
-                      <Td className="min-w-48">{documentTypeLabel(invoice.documentType)}</Td>
-
-                      <Td align="right" className="whitespace-nowrap font-medium tabular-nums text-slate-900">
-                        {formatMoney(invoice.grandTotal)}
-                      </Td>
-
-                      <Td>
-                        <InvoiceStatusBadge status={invoice.status} />
-                      </Td>
-                    </Tr>
-                  ))}
+                          {formatMoney(invoice.grandTotal)}
+                        </Td>
+                      </Tr>
+                    );
+                  })}
                 </tbody>
               </Table>
             )}

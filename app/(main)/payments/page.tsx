@@ -27,6 +27,7 @@ export default async function PaymentsPage() {
         select: {
           id: true,
           invoiceNumber: true,
+          saleOrderNumber: true,
           customerNameSnapshot: true,
           status: true,
         },
@@ -123,6 +124,9 @@ export default async function PaymentsPage() {
                     >
                       {payment.invoice.invoiceNumber}
                     </Link>
+                    {payment.invoice.saleOrderNumber && (
+                      <p className="text-xs text-slate-500">{payment.invoice.saleOrderNumber}</p>
+                    )}
                   </Td>
 
                   <Td className="min-w-40">{payment.invoice.customerNameSnapshot}</Td>

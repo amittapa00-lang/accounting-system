@@ -7,6 +7,7 @@ import { requireApiSession } from "@/lib/auth";
 import { bahtText } from "@/lib/bahtText";
 import { toDateInputValue } from "@/lib/format";
 import { INVOICE_EXCEL_MAX_ITEMS } from "@/lib/invoices";
+import { displayLineDescription, displayLineNumbers, lineHasAmount, toLineType } from "@/lib/lines";
 import { toNumber, type Numeric } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 
@@ -30,6 +31,16 @@ function excelDate(value: Date) {
   return new Date(`${toDateInputValue(value)}T00:00:00Z`);
 }
 
+/**
+ * Template cells with the same formatting share one style object in ExcelJS, so setting the
+ * font, alignment or number format of one cell would change all of them (e.g. the indent of a
+ * SUB line showing on every item row). Give the cell its own copy before changing its format.
+ */
+function ownStyle(cell: ExcelJS.Cell): ExcelJS.Cell {
+  cell.style = { ...cell.style };
+  return cell;
+}
+
 function setDiscountCell(cell: ExcelJS.Cell, discount: Numeric, discountType: string) {
   const value = toNumber(discount);
 
@@ -37,6 +48,8 @@ function setDiscountCell(cell: ExcelJS.Cell, discount: Numeric, discountType: st
     cell.value = null;
     return;
   }
+
+  ownStyle(cell);
 
   if (discountType === "AMOUNT") {
     cell.value = value;
@@ -71,10 +84,21 @@ export async function GET(_request: Request, { params }: RouteContext) {
       throw new ApiError(409, "Invoice นี้ถูกยกเลิกแล้ว ไม่สามารถดาวน์โหลดได้");
     }
 
-    if (invoice.items.length > INVOICE_EXCEL_MAX_ITEMS) {
+    // Rows after the items: one "Discount" row (bill discount) and one row per line of the note.
+    // They share the template's item rows, so they count toward INVOICE_EXCEL_MAX_ITEMS.
+    const billDiscountAmount = toNumber(invoice.billDiscountAmount);
+    const noteRows = (invoice.note ?? "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line !== "")
+      .map((line, index) => (index === 0 ? `หมายเหตุ: ${line}` : line));
+    const extraRows = (billDiscountAmount > 0 ? 1 : 0) + noteRows.length;
+
+    if (invoice.items.length + extraRows > INVOICE_EXCEL_MAX_ITEMS) {
       throw new ApiError(
         400,
-        `Invoice นี้มีสินค้าเกิน ${INVOICE_EXCEL_MAX_ITEMS} รายการ ซึ่งเกินพื้นที่ของแบบฟอร์ม Excel`
+        `Invoice นี้มีสินค้าเกิน ${INVOICE_EXCEL_MAX_ITEMS} รายการ ซึ่งเกินพื้นที่ของแบบฟอร์ม Excel` +
+          (extraRows > 0 ? ` (นับรวมบรรทัดส่วนลดท้ายบิลและหมายเหตุ ${extraRows} บรรทัด)` : "")
       );
     }
 
@@ -121,30 +145,67 @@ export async function GET(_request: Request, { params }: RouteContext) {
     // รายการสินค้า
     // =====================================
 
+    // ITEM and HEADER lines are numbered 1, 2, ...; SUB lines have no number and start with "- "
+    const lineNumbers = displayLineNumbers(invoice.items);
+
     invoice.items.forEach((item, index) => {
       const row = FIRST_ITEM_ROW + index;
+      const lineType = toLineType(item.lineType);
+
+      worksheet.getCell(`B${row}`).value = lineNumbers[index];
+
+      const descriptionCell = ownStyle(worksheet.getCell(`C${row}`));
+      descriptionCell.value = displayLineDescription(item.description, lineType);
+      if (lineType === "HEADER") {
+        descriptionCell.font = { ...descriptionCell.font, bold: true };
+      }
+      if (lineType === "SUB") {
+        descriptionCell.alignment = { ...descriptionCell.alignment, indent: 1 };
+      }
+
+      // HEADER lines are headings only: no quantity, unit, price, discount or amount
+      if (!lineHasAmount(lineType)) return;
+
       const quantity = toNumber(item.quantity);
       const unitPrice = toNumber(item.unitPrice);
 
-      worksheet.getCell(`B${row}`).value = item.itemNo;
-      worksheet.getCell(`C${row}`).value = item.description;
-
-      const quantityCell = worksheet.getCell(`F${row}`);
+      const quantityCell = ownStyle(worksheet.getCell(`F${row}`));
       quantityCell.value = quantity;
       quantityCell.numFmt = plainNumberFormat(quantity);
 
       worksheet.getCell(`G${row}`).value = item.unit ?? "";
 
-      const unitPriceCell = worksheet.getCell(`H${row}`);
+      const unitPriceCell = ownStyle(worksheet.getCell(`H${row}`));
       unitPriceCell.value = unitPrice;
       unitPriceCell.numFmt = MONEY_FORMAT;
 
       setDiscountCell(worksheet.getCell(`I${row}`), item.discount, item.discountType);
 
-      const amountCell = worksheet.getCell(`J${row}`);
+      const amountCell = ownStyle(worksheet.getCell(`J${row}`));
       amountCell.value = toNumber(item.amount);
       amountCell.numFmt = MONEY_FORMAT;
     });
+
+    // =====================================
+    // ส่วนลดท้ายบิล และหมายเหตุ (แถวว่างถัดจากรายการ)
+    // =====================================
+
+    let nextRow = FIRST_ITEM_ROW + invoice.items.length;
+
+    if (billDiscountAmount > 0) {
+      worksheet.getCell(`C${nextRow}`).value = "Discount";
+
+      const discountCell = ownStyle(worksheet.getCell(`J${nextRow}`));
+      discountCell.value = -billDiscountAmount;
+      discountCell.numFmt = MONEY_FORMAT;
+
+      nextRow += 1;
+    }
+
+    for (const text of noteRows) {
+      worksheet.getCell(`C${nextRow}`).value = text;
+      nextRow += 1;
+    }
 
     // =====================================
     // ยอดเงิน (ค่าที่บันทึกไว้ใน Invoice)
@@ -156,7 +217,7 @@ export async function GET(_request: Request, { params }: RouteContext) {
     worksheet.getCell("B43").value = bahtText(invoice.grandTotal);
 
     for (const cell of ["J40", "J42", "J43"]) {
-      worksheet.getCell(cell).numFmt = MONEY_FORMAT;
+      ownStyle(worksheet.getCell(cell)).numFmt = MONEY_FORMAT;
     }
 
     // ตั้งค่าพิมพ์ A4
@@ -173,7 +234,9 @@ export async function GET(_request: Request, { params }: RouteContext) {
 
     const fileBuffer = await workbook.xlsx.writeBuffer();
 
-    const fileName = `Invoice-${invoice.invoiceNumber.replace(/[\\/:*?"<>|]/g, "-")}.xlsx`;
+    // Sub-invoices share the invoice number: add the sub-number so the files do not overwrite each other
+    const baseName = invoice.subNumber > 1 ? `${invoice.invoiceNumber}-${invoice.subNumber}` : invoice.invoiceNumber;
+    const fileName = `Invoice-${baseName.replace(/[\\/:*?"<>|]/g, "-")}.xlsx`;
 
     return new Response(Buffer.from(fileBuffer), {
       status: 200,

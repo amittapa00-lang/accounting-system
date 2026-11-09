@@ -59,7 +59,10 @@ model PurchaseOrder {
 
 model PurchaseOrderItem {
   id              String        @id @default(cuid())
+  /// row order; the printed number comes from lib/lines.ts (SUB lines are not numbered)
   itemNo          Int
+  /// ITEM | HEADER | SUB (see lib/lines.ts)
+  lineType        String        @default("ITEM")
   description     String
   quantity        Decimal       @db.Decimal(14, 4)
   unit            String?
@@ -73,6 +76,7 @@ model PurchaseOrderItem {
   amount          Decimal       @db.Decimal(14, 2)
   purchaseOrderId String
   purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  invoiceItems    InvoiceItem[]
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
@@ -81,7 +85,10 @@ model PurchaseOrderItem {
 
 model Invoice {
   id                      String        @id @default(cuid())
-  invoiceNumber           String        @unique
+  /// IV2026/001 — shared by all sub-invoices of the same PO
+  invoiceNumber           String
+  /// 1, 2, 3 ... within invoiceNumber (one per billing of the PO)
+  subNumber               Int           @default(1)
   /// TAX_INVOICE_DELIVERY | BILLING_INVOICE | RECEIPT (see lib/labels.ts)
   documentType            String
   invoiceDate             DateTime
@@ -96,6 +103,13 @@ model Invoice {
   saleName                String?
   entryBy                 String?
   purchaseOrderId         String
+  note                    String?
+  /// bill discount as entered: PERCENT (10 = 10%) or AMOUNT (baht)
+  billDiscount            Decimal       @default(0) @db.Decimal(14, 4)
+  billDiscountType        String        @default("AMOUNT")
+  /// bill discount in baht, taken off before VAT
+  billDiscountAmount      Decimal       @default(0) @db.Decimal(14, 2)
+  /// after the bill discount
   subtotal                Decimal       @default(0) @db.Decimal(14, 2)
   vat                     Decimal       @default(0) @db.Decimal(14, 2)
   grandTotal              Decimal       @default(0) @db.Decimal(14, 2)
@@ -107,28 +121,35 @@ model Invoice {
   items                   InvoiceItem[]
   payments                Payment[]
 
+  @@unique([invoiceNumber, subNumber])
   @@index([purchaseOrderId])
   @@index([invoiceDate])
   @@index([status])
 }
 
 model InvoiceItem {
-  id           String   @id @default(cuid())
-  itemNo       Int
-  description  String
-  quantity     Decimal  @db.Decimal(14, 4)
-  unit         String?
-  unitPrice    Decimal  @db.Decimal(14, 4)
+  id                  String             @id @default(cuid())
+  itemNo              Int
+  /// ITEM | HEADER | SUB, copied from the PO line
+  lineType            String             @default("ITEM")
+  description         String
+  quantity            Decimal            @db.Decimal(14, 4)
+  unit                String?
+  unitPrice           Decimal            @db.Decimal(14, 4)
   /// PERCENT: percentage (10 = 10%). AMOUNT: baht. Copied from the PO line.
-  discount     Decimal  @default(0) @db.Decimal(14, 4)
-  discountType String   @default("PERCENT")
-  amount       Decimal  @db.Decimal(14, 2)
-  invoiceId    String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  invoice      Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  discount            Decimal            @default(0) @db.Decimal(14, 4)
+  discountType        String             @default("PERCENT")
+  amount              Decimal            @db.Decimal(14, 2)
+  invoiceId           String
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  invoice             Invoice            @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  /// the PO line billed by this line (to know how much of the PO is still unbilled)
+  purchaseOrderItemId String?
+  purchaseOrderItem   PurchaseOrderItem? @relation(fields: [purchaseOrderItemId], references: [id], onDelete: SetNull)
 
   @@index([invoiceId])
+  @@index([purchaseOrderItemId])
 }
 
 model Payment {

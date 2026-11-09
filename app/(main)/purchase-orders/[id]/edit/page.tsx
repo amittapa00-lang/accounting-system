@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 
 import { requirePageSession } from "@/lib/auth";
 import { toDateInputValue } from "@/lib/format";
+import { toLineType } from "@/lib/lines";
 import { formatDiscountInput } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 import { ACTIVE_INVOICE_WHERE, getPoLock } from "@/lib/purchase-orders";
@@ -87,6 +88,7 @@ export default async function EditPurchaseOrderPage({ params }: Props) {
     },
     items: purchaseOrder.items.map((item) => ({
       id: item.id,
+      lineType: toLineType(item.lineType),
       description: item.description,
       quantity: Number(item.quantity),
       unit: item.unit ?? "",

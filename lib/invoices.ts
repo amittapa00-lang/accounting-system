@@ -4,7 +4,16 @@
  * Client-safe: no server-only imports, so components/invoices/InvoiceForm.tsx can
  * use the same calculation as POST /api/invoices for its preview.
  */
-import { calcLine, calcTotals, toNumber, type Numeric, type Totals } from "@/lib/money";
+import {
+  calcDocumentTotals,
+  calcLine,
+  round2,
+  subtractMoney,
+  toNumber,
+  type DocumentTotals,
+  type Numeric,
+} from "@/lib/money";
+import { lineHasAmount } from "@/lib/lines";
 import { formatMoney, formatPercent, toDateInputValue, todayInputValue, yearMonthInThailand } from "@/lib/format";
 import { OPEN_INVOICE_STATUSES } from "@/lib/labels";
 
@@ -26,7 +35,9 @@ export function isBilledInvoiceStatus(status: string) {
 
 // ---------------------------------------------------------------- Lines and totals
 
+/** A PO line as needed to bill it on an invoice. */
 export type PoLineForInvoice = {
+  lineType?: string | null;
   quantity: Numeric;
   unitPrice: Numeric;
   discount: Numeric;
@@ -35,15 +46,60 @@ export type PoLineForInvoice = {
   vat: Numeric;
 };
 
+/** Quantity still to bill on a PO line (never negative, 4 decimals like the column). */
+export function remainingQuantity(poQuantity: Numeric, billed: Numeric): number {
+  const left = Math.round((toNumber(poQuantity) - toNumber(billed)) * 10000) / 10000;
+  return Math.max(left, 0);
+}
+
 /**
- * Invoice line amounts and document totals for the lines of a purchase order.
- * amount = calcLine(PO line).amount; totals = calcTotals(amount + PO VAT rate).
+ * Amount for billing `quantity` units of a PO line when `billedBefore` units were billed on
+ * earlier sub-invoices. A PERCENT discount applies as is. An AMOUNT (baht) discount is shared
+ * in proportion to the quantity, cumulatively, so billing the whole line in parts adds up to
+ * exactly the PO's discount and amount. HEADER lines have no amount.
  */
-export function invoiceLinesFromPo<T extends PoLineForInvoice>(
-  items: T[]
-): { lines: { item: T; amount: number }[]; totals: Totals } {
-  const lines = items.map((item) => ({ item, amount: calcLine(item).amount }));
-  const totals = calcTotals(lines.map((line) => ({ amount: line.amount, vat: line.item.vat })));
+export function partialLine(
+  line: PoLineForInvoice,
+  quantity: number,
+  billedBefore = 0
+): { amount: number; discount: number; discountType: string } {
+  if (!lineHasAmount(line.lineType)) {
+    return { amount: 0, discount: 0, discountType: "PERCENT" };
+  }
+
+  const poQuantity = toNumber(line.quantity);
+
+  if (line.discountType === "AMOUNT" && toNumber(line.discount) !== 0) {
+    const total = toNumber(line.discount);
+    const share = (units: number) => (poQuantity > 0 ? round2((total * Math.min(units, poQuantity)) / poQuantity) : 0);
+    const discount = subtractMoney(share(billedBefore + quantity), share(billedBefore));
+    const { amount } = calcLine({ quantity, unitPrice: line.unitPrice, discount, discountType: "AMOUNT" });
+    return { amount, discount, discountType: "AMOUNT" };
+  }
+
+  const { amount } = calcLine({ quantity, unitPrice: line.unitPrice, discount: line.discount, discountType: line.discountType });
+  return { amount, discount: toNumber(line.discount), discountType: line.discountType ?? "PERCENT" };
+}
+
+/**
+ * Lines and totals of a (sub-)invoice: the chosen PO lines with the quantity billed this time,
+ * plus an optional bill discount. Used by POST /api/invoices and the create form's preview.
+ */
+export function buildInvoiceLines<T extends PoLineForInvoice>(
+  selection: { line: T; quantity: number; billedBefore?: number }[],
+  billDiscount?: { value: Numeric; type: string } | null
+): { lines: { line: T; quantity: number; amount: number; discount: number; discountType: string }[]; totals: DocumentTotals } {
+  const lines = selection.map(({ line, quantity, billedBefore }) => ({
+    line,
+    quantity: lineHasAmount(line.lineType) ? quantity : 0,
+    ...partialLine(line, quantity, billedBefore ?? 0),
+  }));
+
+  const totals = calcDocumentTotals(
+    lines.filter(({ line }) => lineHasAmount(line.lineType)).map(({ line, amount }) => ({ amount, vat: line.vat })),
+    billDiscount
+  );
+
   return { lines, totals };
 }
 
@@ -62,13 +118,26 @@ export function formatQuantity(value: Numeric): string {
 
 // ---------------------------------------------------------------- Numbering
 
-/** Prefix of the running number for an invoice date, by month in Thai time: "INV-202611-". */
-export function invoiceNumberPrefix(invoiceDate: Date): string {
-  const { year, month } = yearMonthInThailand(invoiceDate);
-  return `INV-${year}${month}-`;
+/**
+ * Invoice numbers run per calendar year (C.E., Thai time, by invoice date): IV2026/001, IV2026/002 ...
+ * and start again at 001 every year. One PO keeps one invoice number; when it is billed in parts,
+ * every sub-invoice shares that number and is told apart by its Sale Order No.
+ */
+export const INVOICE_NUMBER_PREFIX = "IV";
+export const SALE_ORDER_PREFIX = "TC";
+
+/** "IV2026/" for an invoice date in 2026 (Thai time). */
+export function invoiceYearPrefix(invoiceDate: Date): string {
+  return `${INVOICE_NUMBER_PREFIX}${yearMonthInThailand(invoiceDate).year}/`;
 }
 
-/** "INV-202611-" + 7 -> "INV-202611-0007" */
+/** "IV2026/" + 7 -> "IV2026/007" */
 export function formatInvoiceNumber(prefix: string, running: number): string {
-  return `${prefix}${String(running).padStart(4, "0")}`;
+  return `${prefix}${String(running).padStart(3, "0")}`;
+}
+
+/** Default Sale Order No. of a sub-invoice: ("IV2026/001", 2) -> "TC 2026/001-002". */
+export function defaultSaleOrderNumber(invoiceNumber: string, subNumber: number): string {
+  const base = invoiceNumber.trim().replace(/^IV\s*/i, "");
+  return `${SALE_ORDER_PREFIX} ${base}-${String(subNumber).padStart(3, "0")}`;
 }

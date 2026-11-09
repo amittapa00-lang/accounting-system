@@ -193,6 +193,66 @@ export function calcTotals(lines: { amount: Numeric; vat?: Numeric }[]): Totals 
   };
 }
 
+export type DocumentTotals = Totals & {
+  /** sum of the line amounts, before the bill discount */
+  itemsTotal: number;
+  /** bill discount in baht (0 when none) */
+  discountAmount: number;
+};
+
+/**
+ * Totals with a discount on the whole bill ("ส่วนลดท้ายบิล"), taken before VAT:
+ *   itemsTotal = sum(line amounts)
+ *   discount   = PERCENT ? round2(itemsTotal * value / 100) : round2(value)   (never more than itemsTotal)
+ *   subtotal   = itemsTotal - discount
+ *   vat        = per VAT rate, on that rate's share of the subtotal, rounded once per rate
+ * With several VAT rates the discount is split in proportion to each rate's amount
+ * (largest remainder, so the shares add up to the discount exactly).
+ * Without a discount this gives the same result as calcTotals.
+ */
+export function calcDocumentTotals(
+  lines: { amount: Numeric; vat?: Numeric }[],
+  discount?: { value: Numeric; type: string | null | undefined } | null
+): DocumentTotals {
+  const groups = new Map<number, number>(); // rate in basis points -> satang
+  for (const line of lines) {
+    const rateBp = Math.round(toNumber(line.vat) * 100);
+    groups.set(rateBp, (groups.get(rateBp) ?? 0) + toSatang(line.amount));
+  }
+
+  const itemsSatang = [...groups.values()].reduce((sum, s) => sum + s, 0);
+  const requested = discount ? toSatang(discountAmount(fromSatang(itemsSatang), discount.value, discount.type)) : 0;
+  const discountSatang = Math.min(Math.max(requested, 0), Math.max(itemsSatang, 0));
+
+  // split the discount over the VAT-rate groups in proportion to their amounts
+  const entries = [...groups.entries()];
+  const shares = entries.map(([, satang]) => (itemsSatang > 0 ? (discountSatang * satang) / itemsSatang : 0));
+  const floors = shares.map(Math.floor);
+  let left = discountSatang - floors.reduce((sum, s) => sum + s, 0);
+  const order = shares.map((s, i) => [s - floors[i], i] as const).sort((a, b) => b[0] - a[0]);
+  for (const [, i] of order) {
+    if (left <= 0) break;
+    floors[i] += 1;
+    left -= 1;
+  }
+
+  let subtotal = 0;
+  let vat = 0;
+  entries.forEach(([rateBp, satang], i) => {
+    const net = satang - floors[i];
+    subtotal += net;
+    vat += Math.round((net * rateBp) / 10000);
+  });
+
+  return {
+    itemsTotal: fromSatang(itemsSatang),
+    discountAmount: fromSatang(discountSatang),
+    subtotal: fromSatang(subtotal),
+    vat: fromSatang(vat),
+    grandTotal: fromSatang(subtotal + vat),
+  };
+}
+
 export type PaymentSummary = {
   paid: number;
   remaining: number;

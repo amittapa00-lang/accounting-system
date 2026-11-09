@@ -56,7 +56,10 @@ export default async function NewPaymentPage({ searchParams }: PageProps) {
         back={{ href: `/invoices/${invoice.id}`, label: `กลับไป Invoice ${invoice.invoiceNumber}` }}
       />
 
+      {/* key: Next keeps visited pages (and their client state) alive; after a payment the next
+          visit must start from the new remaining amount, not the "saving…" state of the last one */}
       <PaymentForm
+        key={`${invoice.id}:${summary.paid}`}
         invoice={{
           id: invoice.id,
           invoiceNumber: invoice.invoiceNumber,

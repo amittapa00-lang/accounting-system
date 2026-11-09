@@ -6,6 +6,8 @@ import { Card, CardBody } from "@/components/ui/card";
 import { Alert } from "@/components/ui/feedback";
 import { PageHeader } from "@/components/ui/page-header";
 import { requirePageSession } from "@/lib/auth";
+import { parseDateInput, todayInputValue } from "@/lib/format";
+import { billingLines, hasUnbilled, invoiceGroupOf, suggestInvoiceNumber } from "@/lib/invoice-billing";
 import { toNumber } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 
@@ -76,21 +78,12 @@ export default async function NewInvoicePage({ searchParams }: Props) {
   }
 
   const purchaseOrder = await prisma.purchaseOrder.findUnique({
-    where: {
-      id: purchaseOrderId,
-    },
+    where: { id: purchaseOrderId },
     include: {
       customer: true,
-      items: {
-        orderBy: {
-          itemNo: "asc",
-        },
-      },
-      // 1 PO = 1 Invoice: a cancelled invoice does not count
       invoices: {
-        where: { status: { not: "CANCELLED" } },
-        select: { id: true, invoiceNumber: true },
-        take: 1,
+        select: { id: true, invoiceNumber: true, subNumber: true, saleOrderNumber: true, status: true, grandTotal: true },
+        orderBy: [{ invoiceNumber: "asc" }, { subNumber: "asc" }],
       },
     },
   });
@@ -101,26 +94,6 @@ export default async function NewInvoicePage({ searchParams }: Props) {
 
   const poHref = `/purchase-orders/${purchaseOrder.id}`;
   const poBack = { href: poHref, label: `PO ${purchaseOrder.poNumber}` };
-  const activeInvoice = purchaseOrder.invoices[0];
-
-  if (activeInvoice) {
-    return (
-      <Notice
-        title="Purchase Order นี้มี Invoice แล้ว"
-        message={
-          <>
-            Purchase Order {purchaseOrder.poNumber} ออก Invoice {activeInvoice.invoiceNumber} ไปแล้ว (1 PO ออกได้ 1
-            Invoice) หากต้องการออกใหม่ ให้ยกเลิก Invoice ฉบับร่างเดิมก่อน
-          </>
-        }
-        href={`/invoices/${activeInvoice.id}`}
-        linkLabel={`ดู Invoice ${activeInvoice.invoiceNumber}`}
-        tone="info"
-        back={poBack}
-        forward
-      />
-    );
-  }
 
   if (purchaseOrder.status === "CANCELLED") {
     return (
@@ -135,7 +108,12 @@ export default async function NewInvoicePage({ searchParams }: Props) {
     );
   }
 
-  if (purchaseOrder.items.length === 0) {
+  const [lines, group] = await Promise.all([
+    billingLines(prisma, purchaseOrder.id),
+    invoiceGroupOf(prisma, purchaseOrder.id),
+  ]);
+
+  if (lines.length === 0) {
     return (
       <Notice
         title="Purchase Order นี้ยังไม่มีรายการสินค้า"
@@ -146,6 +124,24 @@ export default async function NewInvoicePage({ searchParams }: Props) {
       />
     );
   }
+
+  if (!hasUnbilled(lines)) {
+    const latest = purchaseOrder.invoices.findLast((invoice) => invoice.status !== "CANCELLED");
+    return (
+      <Notice
+        title="ออก Invoice ครบทุกรายการแล้ว"
+        message={`ทุกรายการใน Purchase Order ${purchaseOrder.poNumber} ถูกเรียกเก็บใน Invoice ${group?.invoiceNumber ?? ""} ครบแล้ว`}
+        href={latest ? `/invoices/${latest.id}` : poHref}
+        linkLabel={latest ? `ดู Invoice ${latest.invoiceNumber}` : "กลับ Purchase Order"}
+        tone="info"
+        back={poBack}
+        forward={Boolean(latest)}
+      />
+    );
+  }
+
+  const suggestedNumber =
+    group?.invoiceNumber ?? (await suggestInvoiceNumber(prisma, parseDateInput(todayInputValue()) ?? new Date()));
 
   const initialData = {
     purchaseOrderId: purchaseOrder.id,
@@ -158,29 +154,37 @@ export default async function NewInvoicePage({ searchParams }: Props) {
 
     deliveryPlace: purchaseOrder.deliveryPlace ?? "",
     paymentTerm: purchaseOrder.paymentTerm ?? "",
+    note: purchaseOrder.note ?? "",
 
-    items: purchaseOrder.items.map((item) => ({
-      id: item.id,
-      itemNo: item.itemNo,
-      description: item.description,
-      quantity: toNumber(item.quantity),
-      unit: item.unit ?? "",
-      unitPrice: toNumber(item.unitPrice),
-      discount: toNumber(item.discount),
-      discountType: item.discountType,
-      vat: toNumber(item.vat),
+    invoiceNumber: suggestedNumber,
+    /** false: the number is shared with earlier sub-invoices of this PO and cannot change */
+    numberEditable: group === null,
+    subNumber: group?.nextSubNumber ?? 1,
+    existingInvoices: purchaseOrder.invoices.map((invoice) => ({
+      id: invoice.id,
+      label: invoice.saleOrderNumber || `${invoice.invoiceNumber} (${invoice.subNumber})`,
+      status: invoice.status,
+      grandTotal: toNumber(invoice.grandTotal),
     })),
+
+    lines,
   };
 
   return (
     <>
       <PageHeader
-        title="สร้าง Invoice"
-        description={`สร้าง Invoice จาก Purchase Order ${purchaseOrder.poNumber}`}
+        title={group ? `สร้างใบย่อยที่ ${group.nextSubNumber}` : "สร้าง Invoice"}
+        description={
+          group
+            ? `เพิ่มใบย่อยของ Invoice ${group.invoiceNumber} จาก Purchase Order ${purchaseOrder.poNumber}`
+            : `สร้าง Invoice จาก Purchase Order ${purchaseOrder.poNumber}`
+        }
         back={poBack}
       />
 
-      <InvoiceForm initialData={initialData} />
+      {/* key: Next keeps visited pages (and their client state) alive; a new sub-invoice must
+          start with a fresh form, not the "saving…" state left by the previous one */}
+      <InvoiceForm key={`${initialData.purchaseOrderId}:${initialData.subNumber}`} initialData={initialData} />
     </>
   );
 }

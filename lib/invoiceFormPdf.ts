@@ -26,7 +26,8 @@ import { PDFDocument as PdfLibDocument } from "pdf-lib";
 import { bahtText } from "@/lib/bahtText";
 import { formatDate, formatMoney } from "@/lib/format";
 import { formatLineDiscount, formatQuantity } from "@/lib/invoices";
-import type { Numeric } from "@/lib/money";
+import { displayLineDescription, displayLineNumbers, lineHasAmount } from "@/lib/lines";
+import { toNumber, type Numeric } from "@/lib/money";
 
 // ---------------------------------------------------------------------------- geometry
 
@@ -145,11 +146,18 @@ export type InvoiceForForm = {
   customerBranch: string | null;
   shipToSnapshot: string | null;
   purchaseOrderNumber: string | null;
+  /** หมายเหตุ, printed at the bottom-left of the items area on the last sheet */
+  note: string | null;
+  /** bill discount in baht, printed as a "Discount" line above Sub Total (0 = none) */
+  billDiscountAmount: Numeric;
+  /** after the bill discount */
   subtotal: Numeric;
   vat: Numeric;
   grandTotal: Numeric;
   items: {
     itemNo: number;
+    /** ITEM | HEADER | SUB (lib/lines.ts) */
+    lineType?: string | null;
     description: string;
     quantity: Numeric;
     unit: string | null;
@@ -293,16 +301,42 @@ function drawFitted(doc: Doc, text: string | null | undefined, slot: Slot, size:
 
 // ---------------------------------------------------------------------------- layout
 
-type Row = { kind: "item"; item: InvoiceForForm["items"][number]; lines: string[] };
+type Row = { kind: "item"; item: InvoiceForForm["items"][number]; number: number | null; lines: string[] };
 
-/** Splits the items into pages of ITEMS.rows lines; a long description takes several lines. */
+/** SUB lines are indented under their heading. */
+const SUB_INDENT = 8;
+const MAX_NOTE_LINES = 6;
+
+/** Note lines ("หมายเหตุ" + the wrapped note) and the bill discount, drawn at the bottom of the last sheet. */
+function bottomBlock(doc: Doc, invoice: InvoiceForForm) {
+  setFont(doc, false, FONT_SIZE.small);
+  const note = (invoice.note ?? "").trim();
+  const noteLines = note
+    ? ["หมายเหตุ", ...wrapText(doc, note, ITEMS.columns.description.width).filter((l) => l !== "")].slice(0, MAX_NOTE_LINES)
+    : [];
+  const discount = toNumber(invoice.billDiscountAmount);
+  const rows = Math.max(noteLines.length, discount > 0 ? 1 : 0);
+  // one empty row between the last item and the block
+  return { noteLines, discount, reservedRows: rows > 0 ? rows + 1 : 0 };
+}
+
+const rowsUsed = (rows: Row[]) => rows.reduce((n, r) => n + r.lines.length, 0);
+
+/**
+ * Splits the items into pages of ITEMS.rows lines (a long description takes several lines).
+ * The last page keeps room at the bottom for the note and the discount line; items that do
+ * not fit above them move to an extra page.
+ */
 function paginate(doc: Doc, invoice: InvoiceForForm): Row[][] {
-  setFont(doc, false, FONT_SIZE.normal);
+  const numbers = displayLineNumbers(invoice.items);
   const pages: Row[][] = [[]];
   let used = 0;
 
-  for (const item of invoice.items) {
-    let lines = wrapText(doc, item.description, ITEMS.columns.description.width);
+  invoice.items.forEach((item, index) => {
+    setFont(doc, false, FONT_SIZE.normal);
+    const indent = item.lineType === "SUB" ? SUB_INDENT : 0;
+    const text = displayLineDescription(item.description, item.lineType);
+    let lines = wrapText(doc, text, ITEMS.columns.description.width - indent);
     if (lines.length > ITEMS.rows) lines = lines.slice(0, ITEMS.rows);
 
     if (used + lines.length > ITEMS.rows) {
@@ -310,8 +344,17 @@ function paginate(doc: Doc, invoice: InvoiceForForm): Row[][] {
       used = 0;
     }
 
-    pages[pages.length - 1].push({ kind: "item", item, lines });
+    pages[pages.length - 1].push({ kind: "item", item, number: numbers[index], lines });
     used += lines.length;
+  });
+
+  const lastCapacity = ITEMS.rows - bottomBlock(doc, invoice).reservedRows;
+  const last = pages[pages.length - 1];
+  if (rowsUsed(last) > lastCapacity) {
+    const moved: Row[] = [];
+    while (last.length > 0 && rowsUsed(last) > lastCapacity) moved.unshift(last.pop()!);
+    if (last.length === 0) pages.pop();
+    pages.push(moved);
   }
 
   return pages;
@@ -397,18 +440,47 @@ function drawItems(doc: Doc, rows: Row[]) {
   for (const row of rows) {
     const y = ITEMS.firstBaseline + line * ITEMS.rowHeight;
     const { item } = row;
-    const qty = formatQuantity(item.quantity) + (item.unit ? ` ${item.unit}` : "");
+    const indent = item.lineType === "SUB" ? SUB_INDENT : 0;
+    const isHeading = item.lineType === "HEADER";
 
-    drawFitted(doc, String(item.itemNo), { ...c.itemNo, y }, FONT_SIZE.normal);
+    if (row.number !== null) drawFitted(doc, String(row.number), { ...c.itemNo, y }, FONT_SIZE.normal);
     row.lines.forEach((text, i) => {
-      drawFitted(doc, text, { x: c.description.x, y: y + i * ITEMS.rowHeight, width: c.description.width }, FONT_SIZE.normal);
+      drawFitted(
+        doc,
+        text,
+        { x: c.description.x + indent, y: y + i * ITEMS.rowHeight, width: c.description.width - indent },
+        FONT_SIZE.normal,
+        isHeading
+      );
     });
-    drawFitted(doc, qty, { ...c.quantity, y }, FONT_SIZE.normal);
-    drawFitted(doc, formatMoney(item.unitPrice), { ...c.unitPrice, y }, FONT_SIZE.normal);
-    drawFitted(doc, formatLineDiscount(item.discount, item.discountType), { ...c.discount, y }, FONT_SIZE.normal);
-    drawFitted(doc, formatMoney(item.amount), { ...c.amount, y }, FONT_SIZE.normal);
+
+    if (lineHasAmount(item.lineType)) {
+      const qty = formatQuantity(item.quantity) + (item.unit ? ` ${item.unit}` : "");
+      drawFitted(doc, qty, { ...c.quantity, y }, FONT_SIZE.normal);
+      drawFitted(doc, formatMoney(item.unitPrice), { ...c.unitPrice, y }, FONT_SIZE.normal);
+      drawFitted(doc, formatLineDiscount(item.discount, item.discountType), { ...c.discount, y }, FONT_SIZE.normal);
+      drawFitted(doc, formatMoney(item.amount), { ...c.amount, y }, FONT_SIZE.normal);
+    }
 
     line += row.lines.length;
+  }
+}
+
+/** Note (bottom-left of the items area) and the bill discount line (last row, right). */
+function drawBottomBlock(doc: Doc, invoice: InvoiceForForm) {
+  const { noteLines, discount } = bottomBlock(doc, invoice);
+  const c = ITEMS.columns;
+  const rowY = (row: number) => ITEMS.firstBaseline + row * ITEMS.rowHeight;
+
+  noteLines.forEach((text, i) => {
+    const y = rowY(ITEMS.rows - noteLines.length + i);
+    drawFitted(doc, text, { x: c.description.x, y, width: c.description.width }, FONT_SIZE.small, i === 0);
+  });
+
+  if (discount > 0) {
+    const y = rowY(ITEMS.rows - 1);
+    drawFitted(doc, "Discount", { ...c.discount, y }, FONT_SIZE.normal);
+    drawFitted(doc, formatMoney(discount), { ...c.amount, y }, FONT_SIZE.normal);
   }
 }
 
@@ -454,6 +526,7 @@ async function renderDataPages(invoice: InvoiceForForm, offsetMm: { x: number; y
     rightEdgeByDoc.set(doc, RIGHT_EDGE - Math.max(0, offsetMm.x) * MM);
     drawHeader(doc, invoice, index, pages.length);
     drawItems(doc, rows);
+    if (index === pages.length - 1) drawBottomBlock(doc, invoice);
     drawTotals(doc, invoice, index === pages.length - 1);
     doc.restore();
   });

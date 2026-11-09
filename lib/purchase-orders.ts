@@ -17,6 +17,7 @@ import {
   type Numeric,
   type ParsedDiscount,
 } from "@/lib/money";
+import { lineHasAmount, toLineType, type LineType } from "@/lib/lines";
 
 // ---------------------------------------------------------------- Limits
 
@@ -35,6 +36,8 @@ function hasAtMostDecimals(value: number, places: number): boolean {
 
 /** A PO line as typed in the form (or sent to the API). */
 export type PoItemInput = {
+  /** ITEM | HEADER | SUB (see lib/lines.ts); missing = ITEM */
+  lineType?: unknown;
   description?: unknown;
   quantity?: unknown;
   unit?: unknown;
@@ -48,6 +51,7 @@ export type PoItemInput = {
 /** A validated PO line, ready for prisma.purchaseOrderItem.create. */
 export type CleanPoItem = {
   itemNo: number;
+  lineType: LineType;
   description: string;
   quantity: number;
   unit: string | null;
@@ -67,11 +71,29 @@ function trimmedText(value: unknown): string | null {
 /** Validates one line. Throws MoneyInputError("รายการที่ N: ...") when invalid. */
 export function cleanPoItem(input: PoItemInput, index: number): CleanPoItem {
   function fail(message: string): never {
-    throw new MoneyInputError(`รายการที่ ${index + 1}: ${message}`);
+    throw new MoneyInputError(`แถวที่ ${index + 1}: ${message}`);
   }
 
+  const lineType = toLineType(input.lineType);
+
   const description = trimmedText(input.description);
-  if (!description) fail("กรุณากรอกรายละเอียดสินค้า");
+  if (!description) fail(lineType === "HEADER" ? "กรุณากรอกหัวข้อ" : "กรุณากรอกรายละเอียดสินค้า");
+
+  // A heading has no quantity, price, discount or VAT
+  if (!lineHasAmount(lineType)) {
+    return {
+      itemNo: index + 1,
+      lineType,
+      description,
+      quantity: 0,
+      unit: null,
+      unitPrice: 0,
+      discount: 0,
+      discountType: "PERCENT",
+      vat: 0,
+      amount: 0,
+    };
+  }
 
   const quantity = parseNumber(input.quantity as Numeric);
   if (quantity === null || quantity <= 0) fail("จำนวนสินค้าต้องมากกว่า 0");
@@ -111,6 +133,7 @@ export function cleanPoItem(input: PoItemInput, index: number): CleanPoItem {
 
   return {
     itemNo: index + 1,
+    lineType,
     description,
     quantity,
     unit: trimmedText(input.unit),
@@ -138,6 +161,8 @@ export function cleanPoItems(items: unknown): CleanPoItem[] {
  * Never throws: an invalid discount is ignored here (cleanPoItems reports it on submit).
  */
 export function previewPoLine(input: PoItemInput): number {
+  if (!lineHasAmount(input.lineType)) return 0;
+
   const quantity = toNumber(input.quantity as Numeric);
   const unitPrice = toNumber(input.unitPrice as Numeric);
   const { base } = calcLine({ quantity, unitPrice });
@@ -151,6 +176,7 @@ export function previewPoLine(input: PoItemInput): number {
 }
 
 type StoredPoItem = {
+  lineType?: string | null;
   description: string;
   quantity: Numeric;
   unit: string | null;
@@ -169,6 +195,7 @@ export function samePoItems(stored: StoredPoItem[], submitted: CleanPoItem[]): b
     const storedDiscount = toNumber(item.discount);
 
     return (
+      toLineType(item.lineType) === next.lineType &&
       item.description.trim() === next.description &&
       (item.unit?.trim() || null) === next.unit &&
       toNumber(item.quantity) === next.quantity &&
@@ -203,7 +230,7 @@ export function getPoLock(status: string, hasActiveInvoice: boolean): PoLock | n
       reason: "INVOICED",
       identityLocked: true,
       message:
-        "PO นี้มี Invoice แล้ว จึงแก้ไขลูกค้า เลขที่ PO และรายการสินค้าไม่ได้ (แก้ไขได้เฉพาะข้อมูลทั่วไปและหมายเหตุ)",
+        "PO นี้ออก Invoice แล้วอย่างน้อย 1 ใบ จึงแก้ไขลูกค้า เลขที่ PO และรายการสินค้าไม่ได้ (แก้ไขได้เฉพาะข้อมูลทั่วไปและหมายเหตุ) รายการที่ยังไม่ได้เรียกเก็บยังออกใบย่อยถัดไปได้ตามปกติ",
     };
   }
 

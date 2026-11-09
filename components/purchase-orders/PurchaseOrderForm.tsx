@@ -12,6 +12,7 @@ import { Alert } from "@/components/ui/feedback";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { formatMoney, todayInputValue } from "@/lib/format";
 import { PO_STATUSES } from "@/lib/labels";
+import { lineHasAmount, toLineType } from "@/lib/lines";
 import { calcTotals, MoneyInputError } from "@/lib/money";
 import { cleanPoItems, previewPoLine, type PoLock } from "@/lib/purchase-orders";
 
@@ -161,6 +162,18 @@ export default function PurchaseOrderForm({ customers, initialData, lock = null 
           return item;
         }
 
+        if (field === "lineType") {
+          const lineType = toLineType(value);
+
+          // A saved heading is stored without quantity and VAT: give it the defaults of a new line
+          if (!lineHasAmount(item.lineType) && lineHasAmount(lineType) && item.quantity <= 0) {
+            const { quantity, vat } = newPOItem();
+            return { ...item, lineType, quantity, vat };
+          }
+
+          return { ...item, lineType };
+        }
+
         if (field === "description" || field === "unit" || field === "discount") {
           return { ...item, [field]: value };
         }
@@ -222,6 +235,7 @@ export default function PurchaseOrderForm({ customers, initialData, lock = null 
           items: linesLocked
             ? undefined
             : items.map((item) => ({
+                lineType: item.lineType,
                 description: item.description,
                 quantity: item.quantity,
                 unit: item.unit,

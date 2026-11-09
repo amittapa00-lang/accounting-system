@@ -61,6 +61,7 @@ async function getOutstandingInvoices() {
     select: {
       id: true,
       invoiceNumber: true,
+      saleOrderNumber: true,
       customerNameSnapshot: true,
       dueDate: true,
       status: true,
@@ -87,7 +88,7 @@ function getRecentPayments() {
       paymentDate: true,
       amount: true,
       paymentMethod: true,
-      invoice: { select: { id: true, invoiceNumber: true, customerNameSnapshot: true } },
+      invoice: { select: { id: true, invoiceNumber: true, saleOrderNumber: true, customerNameSnapshot: true } },
     },
   });
 }
@@ -190,6 +191,9 @@ export default async function DashboardPage() {
                         <Link href={`/invoices/${invoice.id}`} className="font-medium text-slate-900 hover:text-brand-700">
                           {invoice.invoiceNumber}
                         </Link>
+                        {invoice.saleOrderNumber && (
+                          <span className="ml-1.5 whitespace-nowrap text-xs text-slate-500">{invoice.saleOrderNumber}</span>
+                        )}
                         <p className="max-w-xs truncate text-xs text-slate-500">{invoice.customerNameSnapshot}</p>
                       </Td>
                       <Td className="whitespace-nowrap">
@@ -257,6 +261,11 @@ export default async function DashboardPage() {
                       >
                         {payment.invoice.invoiceNumber}
                       </Link>
+                      {payment.invoice.saleOrderNumber && (
+                        <span className="ml-1.5 whitespace-nowrap text-xs text-slate-500">
+                          {payment.invoice.saleOrderNumber}
+                        </span>
+                      )}
                       <p className="truncate text-xs text-slate-500">
                         {formatDate(payment.paymentDate)} · {paymentMethodLabel(payment.paymentMethod)}
                       </p>
