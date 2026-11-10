@@ -6,7 +6,7 @@ import { ApiError, handleApiError } from "@/lib/api";
 import { requireApiSession } from "@/lib/auth";
 import { bahtText } from "@/lib/bahtText";
 import { toDateInputValue } from "@/lib/format";
-import { INVOICE_EXCEL_MAX_ITEMS } from "@/lib/invoices";
+import { INVOICE_EXCEL_MAX_ITEMS, printedNoteBlocks } from "@/lib/invoices";
 import { displayLineDescription, displayLineNumbers, lineHasAmount, toLineType } from "@/lib/lines";
 import { toNumber, type Numeric } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
@@ -71,7 +71,8 @@ export async function GET(_request: Request, { params }: RouteContext) {
     const invoice = await prisma.invoice.findUnique({
       where: { id },
       include: {
-        purchaseOrder: { select: { poNumber: true } },
+        // acceptance condition and note are printed after the lines
+        purchaseOrder: { select: { poNumber: true, acceptanceCondition: true, note: true } },
         items: { orderBy: { itemNo: "asc" } },
       },
     });
@@ -80,25 +81,26 @@ export async function GET(_request: Request, { params }: RouteContext) {
       throw new ApiError(404, "ไม่พบ Invoice ที่ต้องการ");
     }
 
-    if (invoice.status === "CANCELLED") {
-      throw new ApiError(409, "Invoice นี้ถูกยกเลิกแล้ว ไม่สามารถดาวน์โหลดได้");
-    }
 
-    // Rows after the items: one "Discount" row (bill discount) and one row per line of the note.
+    // Rows after the items: one "Discount" row (bill discount), then one row per line of the PO's
+    // acceptance condition and of the note (same text as the PDF, see printedNoteBlocks).
     // They share the template's item rows, so they count toward INVOICE_EXCEL_MAX_ITEMS.
     const billDiscountAmount = toNumber(invoice.billDiscountAmount);
-    const noteRows = (invoice.note ?? "")
-      .split(/\r?\n/)
+    const noteRows = printedNoteBlocks({
+      acceptanceCondition: invoice.purchaseOrder.acceptanceCondition,
+      purchaseOrderNote: invoice.purchaseOrder.note,
+      invoiceNote: invoice.note,
+    })
+      .flatMap((block) => block.split("\n"))
       .map((line) => line.trim())
-      .filter((line) => line !== "")
-      .map((line, index) => (index === 0 ? `หมายเหตุ: ${line}` : line));
+      .filter((line) => line !== "");
     const extraRows = (billDiscountAmount > 0 ? 1 : 0) + noteRows.length;
 
     if (invoice.items.length + extraRows > INVOICE_EXCEL_MAX_ITEMS) {
       throw new ApiError(
         400,
         `Invoice นี้มีสินค้าเกิน ${INVOICE_EXCEL_MAX_ITEMS} รายการ ซึ่งเกินพื้นที่ของแบบฟอร์ม Excel` +
-          (extraRows > 0 ? ` (นับรวมบรรทัดส่วนลดท้ายบิลและหมายเหตุ ${extraRows} บรรทัด)` : "")
+          (extraRows > 0 ? ` (นับรวมบรรทัดส่วนลดท้ายบิล เงื่อนไขการรับสินค้า และหมายเหตุ ${extraRows} บรรทัด)` : "")
       );
     }
 
@@ -160,7 +162,7 @@ export async function GET(_request: Request, { params }: RouteContext) {
         descriptionCell.alignment = { ...descriptionCell.alignment, indent: 1 };
       }
 
-      // A line without price is text only: no quantity, unit, price, discount or amount
+      // A line without price or amount is text only: no quantity, unit, price, discount or amount
       if (!lineHasAmount(item)) return;
 
       const quantity = toNumber(item.quantity);
@@ -173,7 +175,8 @@ export async function GET(_request: Request, { params }: RouteContext) {
       worksheet.getCell(`G${row}`).value = item.unit ?? "";
 
       const unitPriceCell = ownStyle(worksheet.getCell(`H${row}`));
-      unitPriceCell.value = unitPrice;
+      // Unit Price is optional (only printed): blank when the line is billed by its amount alone
+      unitPriceCell.value = unitPrice > 0 ? unitPrice : null;
       unitPriceCell.numFmt = MONEY_FORMAT;
 
       setDiscountCell(worksheet.getCell(`I${row}`), item.discount, item.discountType);

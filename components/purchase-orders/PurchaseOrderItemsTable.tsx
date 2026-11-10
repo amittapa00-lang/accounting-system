@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CardHeader } from "@/components/ui/card";
 import { cn } from "@/components/ui/cn";
-import { Input } from "@/components/ui/form";
+import { Input, Textarea } from "@/components/ui/form";
 import { formatMoney } from "@/lib/format";
 import { displayLineNumbers, lineHasAmount, type LineType } from "@/lib/lines";
 import { previewPoLine } from "@/lib/purchase-orders";
@@ -25,6 +25,8 @@ export type POItem = {
   /** "10%" = percent, "1,500" = baht, "" = none */
   discount: string;
   vat: number;
+  /** amount to bill, typed by the user (e.g. this round's payment), before the discount */
+  amount: string;
 };
 
 export type POItemField = keyof Omit<POItem, "id">;
@@ -43,6 +45,7 @@ export function newPOItem(lineType: LineType = "ITEM"): POItem {
     unitPrice: 0,
     discount: "",
     vat: 7,
+    amount: "",
   };
 }
 
@@ -55,6 +58,10 @@ type Props = {
   onInsertAfter: (id: string) => string;
   onRemove: (id: string) => void;
   onChange: (id: string, field: POItemField, value: string) => void;
+  /** Leave out the card header (the parent shows its own, e.g. the invoice form) */
+  hideHeader?: boolean;
+  /** Leave out the VAT % column (the invoice form takes one VAT rate for all its typed lines) */
+  hideVat?: boolean;
 };
 
 // Same look as <Th>/<Td>, but tighter padding: the cells hold inputs.
@@ -69,12 +76,21 @@ const numberInput = "text-right tabular-nums";
  * Keyboard, like a bulleted list in Word: Enter in a description adds the next line,
  * Tab on an empty line makes it a sub-line (no number), Shift+Tab makes it numbered again.
  */
-export default function PurchaseOrderItemsTable({ items, readOnly, onAdd, onInsertAfter, onRemove, onChange }: Props) {
+export default function PurchaseOrderItemsTable({
+  items,
+  readOnly,
+  onAdd,
+  onInsertAfter,
+  onRemove,
+  onChange,
+  hideHeader = false,
+  hideVat = false,
+}: Props) {
   const numbers = displayLineNumbers(items);
 
   // Focus the line added with Enter once it has been rendered. (Refs, not DOM ids: the ids of
   // new lines are generated and differ between the server render and the browser.)
-  const descriptionInputs = useRef(new Map<string, HTMLInputElement>());
+  const descriptionInputs = useRef(new Map<string, HTMLTextAreaElement>());
   const pendingFocus = useRef<string | null>(null);
   useEffect(() => {
     if (!pendingFocus.current) return;
@@ -89,11 +105,12 @@ export default function PurchaseOrderItemsTable({ items, readOnly, onAdd, onInse
     if (item.lineType !== lineType) onChange(item.id, "lineType", lineType);
   }
 
-  function handleDescriptionKeyDown(event: KeyboardEvent<HTMLInputElement>, item: POItem) {
+  function handleDescriptionKeyDown(event: KeyboardEvent<HTMLTextAreaElement>, item: POItem) {
     if (event.nativeEvent.isComposing) return;
 
-    if (event.key === "Enter") {
-      // Never submit the whole form from a line
+    // Shift+Enter: a new line inside the description (the textarea's default)
+    if (event.key === "Enter" && !event.shiftKey) {
+      // Enter alone adds the next row
       event.preventDefault();
       pendingFocus.current = onInsertAfter(item.id);
       return;
@@ -114,19 +131,21 @@ export default function PurchaseOrderItemsTable({ items, readOnly, onAdd, onInse
 
   return (
     <>
-      <CardHeader
-        title="รายการสินค้า / งาน"
-        description={readOnly ? "รายการสินค้าถูกล็อก แก้ไขไม่ได้" : "เพิ่มรายการสินค้าได้หลายรายการ"}
-        actions={
-          readOnly ? (
-            <Badge tone="warning">
-              <Lock className="size-3" /> ล็อก
-            </Badge>
-          ) : (
-            <Badge tone="neutral">{items.length} รายการ</Badge>
-          )
-        }
-      />
+      {!hideHeader && (
+        <CardHeader
+          title="รายการสินค้า / งาน"
+          description={readOnly ? "รายการสินค้าถูกล็อก แก้ไขไม่ได้" : "เพิ่มรายการสินค้าได้หลายรายการ"}
+          actions={
+            readOnly ? (
+              <Badge tone="warning">
+                <Lock className="size-3" /> ล็อก
+              </Badge>
+            ) : (
+              <Badge tone="neutral">{items.length} รายการ</Badge>
+            )
+          }
+        />
+      )}
 
       {/* relative: keeps the sr-only header text inside the scroll area on phones */}
       <div className="relative overflow-x-auto">
@@ -158,12 +177,15 @@ export default function PurchaseOrderItemsTable({ items, readOnly, onAdd, onInse
                 <span className="block text-[11px] font-normal text-slate-400">% หรือจำนวนเงิน</span>
               </th>
 
-              <th scope="col" className={cn(th, "w-20 text-right")}>
-                VAT %
-              </th>
+              {!hideVat && (
+                <th scope="col" className={cn(th, "w-20 text-right")}>
+                  VAT %
+                </th>
+              )}
 
-              <th scope="col" className={cn(th, "w-36 text-right", readOnly && "pr-5")}>
+              <th scope="col" className={cn(th, "w-40 text-right", readOnly && "pr-5")}>
                 Amount
+                <span className="block text-[11px] font-normal text-slate-400">ยอดที่เรียกเก็บ</span>
               </th>
 
               {!readOnly && (
@@ -213,25 +235,28 @@ export default function PurchaseOrderItemsTable({ items, readOnly, onAdd, onInse
                   </td>
 
                   <td className={td}>
-                    <div className={cn(isSub && "flex items-center gap-2 pl-5")}>
+                    <div className={cn(isSub && "flex items-start gap-2 pl-5")}>
                       {isSub && (
-                        <span aria-hidden="true" className="text-slate-400">
+                        <span aria-hidden="true" className="pt-2 text-slate-400">
                           -
                         </span>
                       )}
 
-                      <Input
+                      {/* Several lines: grows with its text (Shift+Enter = new line, Enter = next row) */}
+                      <Textarea
                         ref={(input) => {
                           if (input) descriptionInputs.current.set(item.id, input);
                           else descriptionInputs.current.delete(item.id);
                         }}
-                        type="text"
+                        rows={1}
                         value={item.description}
                         onChange={(event) => onChange(item.id, "description", event.target.value)}
                         onKeyDown={(event) => handleDescriptionKeyDown(event, item)}
                         placeholder={isSub ? "รายการย่อย (ไม่มีเลขลำดับ)" : "รายละเอียดสินค้า / งาน"}
                         aria-label={`รายละเอียด แถวที่ ${row}`}
+                        title="Shift+Enter = ขึ้นบรรทัดใหม่ · Enter = เพิ่มแถวถัดไป"
                         disabled={readOnly}
+                        className="field-sizing-content min-h-10 max-h-64 resize-y leading-6"
                       />
                     </div>
                   </td>
@@ -285,32 +310,53 @@ export default function PurchaseOrderItemsTable({ items, readOnly, onAdd, onInse
                     />
                   </td>
 
-                  <td className={td}>
-                    <Input
-                      type="number"
-                      min="0"
-                      max="100"
-                      step="0.01"
-                      value={item.vat}
-                      onChange={(event) => onChange(item.id, "vat", event.target.value)}
-                      aria-label={`VAT % แถวที่ ${row}`}
-                      disabled={readOnly}
-                      className={numberInput}
-                    />
-                  </td>
+                  {!hideVat && (
+                    <td className={td}>
+                      <Input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={item.vat}
+                        onChange={(event) => onChange(item.id, "vat", event.target.value)}
+                        aria-label={`VAT % แถวที่ ${row}`}
+                        disabled={readOnly}
+                        className={numberInput}
+                      />
+                    </td>
+                  )}
 
-                  <td
-                    className={cn(
-                      td,
-                      "whitespace-nowrap pt-4 text-right font-semibold tabular-nums text-slate-900",
-                      readOnly && "pr-5"
-                    )}
-                  >
-                    {/* No price = text line: nothing is printed in the money columns */}
-                    {lineHasAmount(item) ? (
-                      formatMoney(previewPoLine(item))
+                  <td className={cn(td, readOnly && "pr-5")}>
+                    {readOnly ? (
+                      lineHasAmount(item) ? (
+                        <span className="block pt-2 text-right font-semibold tabular-nums text-slate-900">
+                          {formatMoney(previewPoLine(item))}
+                        </span>
+                      ) : (
+                        // no price and no amount = text line: nothing is printed in the money columns
+                        <span className="block pt-2 text-right text-xs text-slate-400">ไม่มีราคา</span>
+                      )
                     ) : (
-                      <span className="text-xs font-normal text-slate-400">ไม่มีราคา</span>
+                      <>
+                        <Input
+                          type="text"
+                          inputMode="decimal"
+                          value={item.amount}
+                          onChange={(event) => onChange(item.id, "amount", event.target.value)}
+                          // blank is fine for a text line; a line with a Unit Price needs an amount
+                          placeholder={item.unitPrice > 0 ? "กรอกยอด" : "ไม่มีราคา"}
+                          title="ยอดที่เรียกเก็บของรายการนี้ (ไม่คำนวณจาก Unit Price) · เว้นว่างได้ถ้าเป็นบรรทัดข้อความ"
+                          aria-label={`Amount แถวที่ ${row}`}
+                          aria-invalid={(item.unitPrice > 0 && item.amount.trim() === "") || undefined}
+                          className={cn(numberInput, "font-semibold placeholder:font-normal")}
+                        />
+                        {/* what counts in the totals when a discount is taken off */}
+                        {item.discount.trim() !== "" && item.amount.trim() !== "" && (
+                          <span className="mt-1 block text-right text-[11px] tabular-nums text-slate-500">
+                            หลังส่วนลด {formatMoney(previewPoLine(item))}
+                          </span>
+                        )}
+                      </>
                     )}
                   </td>
 
@@ -344,9 +390,11 @@ export default function PurchaseOrderItemsTable({ items, readOnly, onAdd, onInse
           <p className="min-w-0 text-xs leading-5 text-slate-500">
             <kbd className="rounded border border-slate-300 bg-white px-1 font-sans text-[11px] text-slate-700">Enter</kbd>{" "}
             ในช่องรายละเอียด = เพิ่มแถวถัดไป ·{" "}
+            <kbd className="rounded border border-slate-300 bg-white px-1 font-sans text-[11px] text-slate-700">Shift+Enter</kbd>{" "}
+            = ขึ้นบรรทัดใหม่ในช่องเดิม ·{" "}
             <kbd className="rounded border border-slate-300 bg-white px-1 font-sans text-[11px] text-slate-700">Tab</kbd>{" "}
             ในแถวว่าง หรือปุ่ม <IndentIncrease className="inline size-3.5 align-[-2px]" /> = ทำเป็นรายการย่อย (ไม่มีเลขลำดับ) ·
-            ไม่ใส่ราคา = บรรทัดข้อความ ไม่พิมพ์จำนวน/ราคา
+            ไม่ใส่ทั้ง Unit Price และ Amount = บรรทัดข้อความ ไม่พิมพ์จำนวน/ราคา · ยอดรวมคิดจาก Amount - Discount แล้วคิด VAT (Unit Price ไม่นำมาคำนวณ)
           </p>
         </div>
       )}

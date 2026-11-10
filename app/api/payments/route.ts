@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 
 import { ApiError, handleApiError, optionalText, readJson, requiredText } from "@/lib/api";
 import { requireApiSession } from "@/lib/auth";
-import { isPaymentMethod } from "@/lib/labels";
+import { formatMoney } from "@/lib/format";
+import { logInvoice } from "@/lib/invoice-log";
+import { documentTypeForStatus } from "@/lib/invoices";
+import { isPaymentMethod, paymentMethodLabel } from "@/lib/labels";
 import { compareMoney, paymentSummary } from "@/lib/money";
 import {
   exceedsRemainingMessage,
@@ -107,9 +110,19 @@ export async function POST(request: Request) {
 
       const after = paymentSummary(invoice.grandTotal, [...paidAmounts, amount]);
 
+      await logInvoice(
+        tx,
+        invoice.id,
+        "PAYMENT",
+        session,
+        `${formatMoney(amount)} บาท (${paymentMethodLabel(paymentMethod)}) คงเหลือ ${formatMoney(after.remaining)} บาท`
+      );
+
+      // The document type follows the status (ใบวางบิล while part is owed, ใบเสร็จ once paid)
+      const status = statusAfterPayment(after);
       const updatedInvoice = await tx.invoice.update({
         where: { id: invoice.id },
-        data: { status: statusAfterPayment(after) },
+        data: { status, ...(status !== invoice.status ? { documentType: documentTypeForStatus(status) } : {}) },
       });
 
       return {

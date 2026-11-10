@@ -12,10 +12,10 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageSession } from "@/lib/auth";
 import { formatDate, formatMoney, formatPercent } from "@/lib/format";
-import { billingLines, hasUnbilled, invoiceGroupOf } from "@/lib/invoice-billing";
+import { billingBalance, billingLines, invoiceGroupOf } from "@/lib/invoice-billing";
 import { formatLineDiscount, formatQuantity } from "@/lib/invoices";
 import { displayLineDescription, displayLineNumbers, lineHasAmount, toLineType } from "@/lib/lines";
-import { calcTotals, sumMoney } from "@/lib/money";
+import { calcTotals, sumMoney, toNumber } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 
 export const instant = false;
@@ -34,7 +34,7 @@ export default async function PurchaseOrderDetailPage({ params }: Props) {
 
   const { id } = await params;
 
-  const [purchaseOrder, lines, group] = await Promise.all([
+  const [purchaseOrder, lines, group, balance] = await Promise.all([
     prisma.purchaseOrder.findUnique({
       where: {
         id,
@@ -62,6 +62,7 @@ export default async function PurchaseOrderDetailPage({ params }: Props) {
     }),
     billingLines(prisma, id),
     invoiceGroupOf(prisma, id),
+    billingBalance(prisma, id),
   ]);
 
   if (!purchaseOrder) {
@@ -71,15 +72,13 @@ export default async function PurchaseOrderDetailPage({ params }: Props) {
   const { subtotal, vat, grandTotal } = calcTotals(purchaseOrder.items);
   const numbers = displayLineNumbers(purchaseOrder.items);
   const billingById = new Map(lines.map((line) => [line.id, line]));
-  // Billed / remaining per line is shown once something has been billed (before that, everything remains)
-  const billingStarted = lines.some((line) => line.billed > 0);
 
   // One PO = one invoice number, billed in parts as sub-invoices (ใบย่อย 1, 2, 3 ...)
   const isCancelled = purchaseOrder.status === "CANCELLED";
   const hasPricedLines = lines.some((line) => lineHasAmount(line));
-  const unbilled = hasUnbilled(lines);
-  const canCreateInvoice = !isCancelled && unbilled;
-  const fullyBilled = hasPricedLines && !unbilled;
+  // Every invoice is deducted from the PO total (before VAT); more can be created while some is left
+  const canCreateInvoice = !isCancelled && balance.remaining > 0;
+  const fullyBilled = hasPricedLines && balance.remaining <= 0;
 
   const createHref = `/invoices/new?purchaseOrderId=${purchaseOrder.id}`;
   const createLabel = group ? `สร้างใบย่อยถัดไป (ใบที่ ${group.nextSubNumber})` : "สร้าง Invoice จาก PO";
@@ -96,6 +95,8 @@ export default async function PurchaseOrderDetailPage({ params }: Props) {
           `${activeInvoices.length} ใบ`,
           cancelledCount > 0 && `ยกเลิก ${cancelledCount} ใบ`,
           `ยอดรวม ${formatMoney(activeTotal)}`,
+          `เรียกเก็บแล้ว ${formatMoney(balance.billed)} จาก ${formatMoney(balance.total)} (ก่อน VAT)`,
+          `คงเหลือ ${formatMoney(balance.remaining)}`,
         ]
           .filter(Boolean)
           .join(" · ")
@@ -128,8 +129,8 @@ export default async function PurchaseOrderDetailPage({ params }: Props) {
           จึงสร้าง Invoice จาก PO นี้ไม่ได้
         </Alert>
       ) : fullyBilled ? (
-        <Alert tone="info" title="ออก Invoice ครบทุกรายการแล้ว" className="mb-6">
-          ทุกรายการใน PO นี้ถูกเรียกเก็บแล้ว
+        <Alert tone="info" title="เรียกเก็บครบยอด PO แล้ว" className="mb-6">
+          ยอด PO {formatMoney(balance.total)} บาท (ก่อน VAT) ถูกเรียกเก็บแล้ว
           {group && ` ใน Invoice ${group.invoiceNumber} (${activeInvoices.length} ใบ)`}
         </Alert>
       ) : (
@@ -186,7 +187,6 @@ export default async function PurchaseOrderDetailPage({ params }: Props) {
                   }
 
                   const billing = billingById.get(item.id);
-                  const done = billing !== undefined && billing.remaining <= 0;
 
                   return (
                     <Tr key={item.id}>
@@ -197,15 +197,16 @@ export default async function PurchaseOrderDetailPage({ params }: Props) {
                       <Td className={cn("min-w-48 text-slate-900", lineType === "SUB" && "pl-10 text-slate-700")}>
                         <span className="whitespace-pre-line">{description}</span>
 
-                        {/* Billing progress (under the description so the table stays narrow) */}
-                        {billingStarted && billing && (
+                        {/* Billing progress (under the description so the table stays narrow);
+                            lines typed on an invoice (ทำรายการใหม่) only count in the PO balance */}
+                        {billing && billing.billed > 0 && (
                           <span
                             className={cn(
                               "mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs tabular-nums",
-                              done ? "text-emerald-700" : "text-slate-500"
+                              billing.remaining <= 0 ? "text-emerald-700" : "text-slate-500"
                             )}
                           >
-                            {done ? (
+                            {billing.remaining <= 0 ? (
                               <>
                                 <CheckCircle2 className="size-3.5" />
                                 เรียกเก็บครบแล้ว ({formatQuantity(billing.billed)} {item.unit ?? ""})
@@ -232,7 +233,7 @@ export default async function PurchaseOrderDetailPage({ params }: Props) {
                       </Td>
 
                       <Td align="right" className="whitespace-nowrap tabular-nums">
-                        {formatMoney(item.unitPrice)}
+                        {toNumber(item.unitPrice) > 0 ? formatMoney(item.unitPrice) : "-"}
                       </Td>
 
                       <Td align="right" className="whitespace-nowrap tabular-nums">

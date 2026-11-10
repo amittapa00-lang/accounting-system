@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { DetailBlock } from "@/components/ui/data-display";
 import { Alert } from "@/components/ui/feedback";
+import { toast } from "@/components/ui/toast";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { formatMoney, todayInputValue } from "@/lib/format";
 import { PO_STATUSES } from "@/lib/labels";
@@ -119,7 +120,6 @@ export default function PurchaseOrderForm({ customers, initialData, lock = null 
   const [items, setItems] = useState<POItem[]>(() => initialData?.items ?? [newPOItem()]);
 
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
 
   const selectedCustomer = customers.find((customer) => customer.id === header.customerId);
@@ -180,7 +180,7 @@ export default function PurchaseOrderForm({ customers, initialData, lock = null 
           return { ...item, lineType: toLineType(value) };
         }
 
-        if (field === "description" || field === "unit" || field === "discount") {
+        if (field === "description" || field === "unit" || field === "discount" || field === "amount") {
           return { ...item, [field]: value };
         }
 
@@ -193,7 +193,6 @@ export default function PurchaseOrderForm({ customers, initialData, lock = null 
     event.preventDefault();
 
     setError("");
-    setSuccess("");
 
     if (!header.poNumber.trim()) {
       setError("กรุณากรอก PO No.");
@@ -248,6 +247,7 @@ export default function PurchaseOrderForm({ customers, initialData, lock = null 
                 unitPrice: item.unitPrice,
                 discount: item.discount,
                 vat: item.vat,
+                amount: item.amount,
               })),
         }),
       });
@@ -260,23 +260,11 @@ export default function PurchaseOrderForm({ customers, initialData, lock = null 
         return;
       }
 
-      if (initialData) {
-        setSuccess("แก้ไข PO สำเร็จ");
+      toast(initialData ? `บันทึกการแก้ไข PO ${header.poNumber.trim()} สำเร็จ` : `บันทึก PO ${header.poNumber.trim()} สำเร็จ`);
 
-        // Keep the button disabled until we have left the page (prevents a second save)
-        setTimeout(() => {
-          router.push(`/purchase-orders/${initialData.id}`);
-          router.refresh();
-        }, 500);
-
-        return;
-      }
-
-      setSuccess("บันทึก PO พร้อมรายการสำเร็จ");
-      setHeader(emptyHeader());
-      setItems([newPOItem()]);
-      setLoading(false);
-
+      // Back to the PO list. loading stays true so the button is disabled until we have left the page
+      // (prevents a second save); refresh so the list shows the saved PO.
+      router.push("/purchase-orders");
       router.refresh();
     } catch (submitError) {
       console.error(submitError);
@@ -545,8 +533,6 @@ export default function PurchaseOrderForm({ customers, initialData, lock = null 
       {/* Action bar: stays at the bottom of the screen while scrolling through the long form */}
       <div className="sticky bottom-4 z-20 space-y-3 rounded-xl border border-slate-200 bg-white/95 p-3 shadow-lg backdrop-blur sm:px-5 print:hidden">
         {error && <Alert tone="danger">{error}</Alert>}
-
-        {success && <Alert tone="success">{success}</Alert>}
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-baseline justify-between gap-3 sm:block">

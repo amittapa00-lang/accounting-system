@@ -5,7 +5,7 @@ import { toDateInputValue } from "@/lib/format";
 import { toLineType } from "@/lib/lines";
 import { formatDiscountInput } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
-import { ACTIVE_INVOICE_WHERE, getPoLock } from "@/lib/purchase-orders";
+import { ACTIVE_INVOICE_WHERE, getPoLock, poAmountInput } from "@/lib/purchase-orders";
 
 import PurchaseOrderForm, { type PurchaseOrderInitialData } from "@/components/purchase-orders/PurchaseOrderForm";
 import { PoStatusBadge } from "@/components/ui/badge";
@@ -95,6 +95,7 @@ export default async function EditPurchaseOrderPage({ params }: Props) {
       unitPrice: Number(item.unitPrice),
       discount: formatDiscountInput(item.discount, item.discountType),
       vat: Number(item.vat),
+      amount: poAmountInput(item),
     })),
   };
 

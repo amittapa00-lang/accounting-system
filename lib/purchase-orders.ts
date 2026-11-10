@@ -8,11 +8,15 @@
  * lib/api handleApiError turns them into HTTP 400.
  */
 import {
-  calcLine,
+  discountAmount,
+  fromSatang,
   MoneyInputError,
   parseDiscount,
   parseNumber,
+  round2,
+  subtractMoney,
   toNumber,
+  toSatang,
   type DiscountType,
   type Numeric,
   type ParsedDiscount,
@@ -46,6 +50,11 @@ export type PoItemInput = {
   discount?: unknown;
   /** VAT rate in percent (7 = 7%) */
   vat?: unknown;
+  /**
+   * Amount to bill for the line, before its discount, typed by the user (e.g. this round's
+   * payment). Unit Price is the price of the whole job and is not used for the amount.
+   */
+  amount?: unknown;
 };
 
 /** A validated PO line, ready for prisma.purchaseOrderItem.create. */
@@ -68,6 +77,10 @@ function trimmedText(value: unknown): string | null {
   return text === "" ? null : text;
 }
 
+function isBlank(value: unknown): boolean {
+  return value === undefined || value === null || (typeof value === "string" && value.trim() === "");
+}
+
 /** A number typed in the form; an empty field counts as 0, anything that is not a number as null. */
 function blankAsZero(value: unknown): number | null {
   if (value === undefined || value === null || (typeof value === "string" && value.trim() === "")) return 0;
@@ -85,16 +98,20 @@ export function cleanPoItem(input: PoItemInput, index: number): CleanPoItem {
   const description = trimmedText(input.description);
   if (!description) fail("กรุณากรอกรายละเอียดสินค้า");
 
-  // Quantity and price may be left at 0 for a text line (a heading or a note under a line):
-  // it prints only its description. A line with a price must have a quantity.
+  // A line with an Amount is billed; Unit Price is optional (it is only printed). A line with
+  // neither is a text line (a heading or a note under a line): it prints only its description.
   const unitPrice = blankAsZero(input.unitPrice);
   if (unitPrice === null || unitPrice < 0) fail("ราคาสินค้าไม่ถูกต้อง");
   if (unitPrice > MAX_QUANTITY_OR_PRICE) fail("ราคาสินค้ามากเกินไป");
   if (!hasAtMostDecimals(unitPrice, 4)) fail("ราคาสินค้ามีทศนิยมได้ไม่เกิน 4 ตำแหน่ง");
 
+  const hasAmount = !isBlank(input.amount);
+  const priced = hasAmount || unitPrice > 0;
+
+  // A billed line needs a quantity: billing it in parts goes by quantity
   const quantity = blankAsZero(input.quantity);
   if (quantity === null || quantity < 0) fail("จำนวนสินค้าไม่ถูกต้อง");
-  if (unitPrice > 0 && quantity === 0) fail("จำนวนสินค้าต้องมากกว่า 0 (ถ้าเป็นบรรทัดข้อความ ให้ลบราคาออก)");
+  if (priced && quantity === 0) fail("จำนวนสินค้าต้องมากกว่า 0 (ถ้าเป็นบรรทัดข้อความ ให้ลบราคาและ Amount ออก)");
   if (quantity > MAX_QUANTITY_OR_PRICE) fail("จำนวนสินค้ามากเกินไป");
   if (!hasAtMostDecimals(quantity, 4)) fail("จำนวนสินค้ามีทศนิยมได้ไม่เกิน 4 ตำแหน่ง");
 
@@ -105,24 +122,29 @@ export function cleanPoItem(input: PoItemInput, index: number): CleanPoItem {
     fail("VAT ต้องอยู่ระหว่าง 0-100% (ทศนิยมไม่เกิน 2 ตำแหน่ง)");
   }
 
-  const { base } = calcLine({ quantity, unitPrice });
-  if (base > MAX_LINE_AMOUNT) fail("ยอดเงินของรายการมากเกินไป");
+  // Amount is typed by the user; Unit Price (the price of the whole job) is not used for it
+  let gross = 0;
+  if (priced) {
+    const typed = hasAmount ? parseNumber(input.amount as Numeric) : null;
+    if (!hasAmount) fail("กรุณากรอก Amount (ยอดที่เรียกเก็บ)");
+    if (typed === null || typed <= 0) fail("Amount ต้องมากกว่า 0");
+    if (typed > MAX_LINE_AMOUNT) fail("Amount มากเกินไป");
+    if (!hasAtMostDecimals(typed, 2)) fail("Amount มีทศนิยมได้ไม่เกิน 2 ตำแหน่ง");
+    gross = typed;
+  }
 
+  // Discount comes off the Amount
   let discount: ParsedDiscount;
   try {
-    discount = parseDiscount(input.discount as Numeric, base);
+    discount = parseDiscount(priced ? (input.discount as Numeric) : "", gross);
   } catch (error) {
     if (error instanceof MoneyInputError) fail(error.message);
     throw error;
   }
   if (!hasAtMostDecimals(discount.value, 4)) fail("Discount มีทศนิยมได้ไม่เกิน 4 ตำแหน่ง");
 
-  const { amount } = calcLine({
-    quantity,
-    unitPrice,
-    discount: discount.value,
-    discountType: discount.type,
-  });
+  const amount = subtractMoney(gross, discount.amount);
+  if (priced && amount <= 0) fail("ยอดหลังหักส่วนลดต้องมากกว่า 0");
 
   return {
     itemNo: index + 1,
@@ -150,20 +172,41 @@ export function cleanPoItems(items: unknown): CleanPoItem[] {
 }
 
 /**
- * Amount of a line for the live preview in the form, same formula as cleanPoItem.
+ * Amount of a line for the live preview in the form: Amount - Discount (0 while Amount is blank).
  * Never throws: an invalid discount is ignored here (cleanPoItems reports it on submit).
  */
 export function previewPoLine(input: PoItemInput): number {
-  const quantity = toNumber(input.quantity as Numeric);
-  const unitPrice = toNumber(input.unitPrice as Numeric);
-  const { base } = calcLine({ quantity, unitPrice });
+  if (isBlank(input.amount)) return 0;
+  const gross = parseNumber(input.amount as Numeric);
+  if (gross === null || gross <= 0) return 0;
 
   try {
-    const discount = parseDiscount(input.discount as Numeric, base);
-    return calcLine({ quantity, unitPrice, discount: discount.value, discountType: discount.type }).amount;
+    return subtractMoney(gross, parseDiscount(input.discount as Numeric, gross).amount);
   } catch {
-    return base;
+    return round2(gross);
   }
+}
+
+/**
+ * Value for the Amount box when a stored line is edited. The stored amount is after the
+ * discount, the box holds the Amount before it: the value that gives back the stored amount.
+ */
+export function poAmountInput(stored: { unitPrice: Numeric; discount: Numeric; discountType: string; amount: Numeric }): string {
+  if (toNumber(stored.amount) <= 0) return "";
+
+  const net = toNumber(stored.amount);
+  const discount = toNumber(stored.discount);
+  if (discount === 0) return String(net);
+  if (stored.discountType === "AMOUNT") return String(round2(net + discount));
+  if (discount >= 100) return String(net);
+
+  // Percent: Amount - round2(Amount x %) = stored; try the nearest satang values
+  const estimate = toSatang(net / (1 - discount / 100));
+  for (const offset of [0, -1, 1, -2, 2]) {
+    const gross = fromSatang(estimate + offset);
+    if (subtractMoney(gross, discountAmount(gross, discount, "PERCENT")) === net) return String(gross);
+  }
+  return String(round2(net / (1 - discount / 100)));
 }
 
 type StoredPoItem = {
@@ -175,6 +218,7 @@ type StoredPoItem = {
   discount: Numeric;
   discountType: string;
   vat: Numeric;
+  amount: Numeric;
 };
 
 /** True when the submitted lines are the same as the stored ones (ignoring whitespace and the type of a zero discount). */
@@ -192,6 +236,7 @@ export function samePoItems(stored: StoredPoItem[], submitted: CleanPoItem[]): b
       toNumber(item.quantity) === next.quantity &&
       toNumber(item.unitPrice) === next.unitPrice &&
       toNumber(item.vat) === next.vat &&
+      toNumber(item.amount) === next.amount &&
       storedDiscount === next.discount &&
       (storedDiscount === 0 || item.discountType === next.discountType)
     );

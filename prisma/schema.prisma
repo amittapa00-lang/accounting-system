@@ -120,11 +120,28 @@ model Invoice {
   purchaseOrder           PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
   items                   InvoiceItem[]
   payments                Payment[]
+  logs                    InvoiceLog[]
 
   @@unique([invoiceNumber, subNumber])
   @@index([purchaseOrderId])
   @@index([invoiceDate])
   @@index([status])
+}
+
+/// History of an invoice: who did what and when (see lib/invoice-log.ts)
+model InvoiceLog {
+  id        String   @id @default(cuid())
+  invoiceId String
+  /// CREATED | EDITED | BILLED | UNBILLED | PAID | UNPAID | PAYMENT | CANCELLED | STATUS
+  action    String
+  /// what changed, one line per change (Thai)
+  detail    String?
+  /// name of the signed-in user at the time
+  userName  String?
+  createdAt DateTime @default(now())
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId, createdAt])
 }
 
 model InvoiceItem {

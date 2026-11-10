@@ -7,7 +7,7 @@
  *   ITEM  numbered line                                  "1  ค่าบริการติดตั้ง (2 รอบ)"
  *   SUB   un-numbered line, indented under the line above "   - ค่าแรงช่าง   6 วัน  9,500.00  57,000.00"
  *
- * A line without a unit price is text only (a heading or a note line): documents print its
+ * A line without a unit price or an amount is text only (a heading or a note line): documents print its
  * description but no quantity, price or amount, and it is not billed by quantity.
  *
  * The stored itemNo is only the row order; the number printed on documents comes from
@@ -28,9 +28,13 @@ export function toLineType(value: unknown): LineType {
   return value === "SUB" ? "SUB" : "ITEM";
 }
 
-/** True when the line has a unit price: it prints quantity, price and amount and is billed by quantity. */
-export function lineHasAmount(line: { unitPrice: Numeric }): boolean {
-  return toNumber(line.unitPrice) > 0;
+/**
+ * True when the line has money on it (an amount, or a unit price): it prints quantity, price
+ * and amount and is billed by quantity. A line with neither is text only. A line may have an
+ * amount without a unit price (e.g. a sub-line billed on its own).
+ */
+export function lineHasAmount(line: { unitPrice: Numeric; amount: Numeric }): boolean {
+  return toNumber(line.unitPrice) > 0 || toNumber(line.amount) > 0;
 }
 
 /** Number shown for each line: 1, 2, ... for ITEM, null for SUB. */
@@ -56,7 +60,7 @@ export function displayLineDescription(description: string, type: unknown): stri
  * ticked when their group bills something now, or when the group has no priced line at all.
  */
 export function defaultSelectedLines(
-  lines: { lineType?: string | null; unitPrice: Numeric; remaining: number }[]
+  lines: { lineType?: string | null; unitPrice: Numeric; amount: Numeric; remaining: number }[]
 ): boolean[] {
   const groupOf: number[] = [];
   let group = -1;

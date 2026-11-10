@@ -47,3 +47,6 @@ next-env.d.ts
 
 # OS
 .DS_Store
+# local MCP config (contains tokens) and Playwright MCP output
+.mcp.json
+/.playwright-mcp/

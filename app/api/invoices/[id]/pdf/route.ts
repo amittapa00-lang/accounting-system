@@ -46,6 +46,9 @@ export async function GET(request: Request, { params }: RouteContext) {
         purchaseOrder: {
           select: {
             poNumber: true,
+            // printed after the lines (lib/invoices.ts printedNoteBlocks)
+            acceptanceCondition: true,
+            note: true,
             customer: { select: { branchType: true, branchNumber: true } },
           },
         },
@@ -56,14 +59,13 @@ export async function GET(request: Request, { params }: RouteContext) {
       throw new ApiError(404, "ไม่พบ Invoice ที่ต้องการ");
     }
 
-    if (invoice.status === "CANCELLED") {
-      throw new ApiError(409, "Invoice นี้ถูกยกเลิกแล้ว ไม่สามารถพิมพ์ได้");
-    }
 
     const pdf = await renderInvoiceFormPdf(
       {
         ...invoice,
         purchaseOrderNumber: invoice.purchaseOrder.poNumber,
+        acceptanceCondition: invoice.purchaseOrder.acceptanceCondition,
+        purchaseOrderNote: invoice.purchaseOrder.note,
         customerBranch: branchLabel(
           invoice.purchaseOrder.customer.branchType,
           invoice.purchaseOrder.customer.branchNumber

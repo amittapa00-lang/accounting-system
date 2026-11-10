@@ -28,6 +28,9 @@ export function paymentBlockedReason(status: string): string | null {
   }
 }
 
+/** Note on payments created by the "รับเงินแล้ว" switch, so they can be told apart in the payment history. */
+export const AUTO_PAYMENT_NOTE = "บันทึกอัตโนมัติจากปุ่ม \"รับเงินแล้ว\"";
+
 /** Invoice status once payments are recorded: PAID exactly when nothing remains. */
 export function statusAfterPayment(summary: PaymentSummary): "PAID" | "PARTIAL" {
   return summary.isFullyPaid ? "PAID" : "PARTIAL";

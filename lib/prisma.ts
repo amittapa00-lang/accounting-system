@@ -10,6 +10,9 @@ function createPrismaClient() {
 
   return new PrismaClient({
     adapter: new PrismaPg({ connectionString }),
+    // Opening a fresh connection to the remote database can take several seconds
+    // (TLS + cold start), longer than Prisma's 2s default wait to start a transaction.
+    transactionOptions: { maxWait: 10_000 },
   });
 }
 

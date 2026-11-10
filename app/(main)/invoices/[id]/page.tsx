@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ClipboardList, FilePlus2, Plus, Receipt, Wallet } from "lucide-react";
+import { ClipboardList, FilePlus2, Pencil, Plus, Receipt, Wallet } from "lucide-react";
 
 import { Badge, InvoiceStatusBadge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
@@ -11,15 +11,17 @@ import { Alert, EmptyState } from "@/components/ui/feedback";
 import { PageHeader } from "@/components/ui/page-header";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageSession } from "@/lib/auth";
-import { formatDate, formatMoney, formatPercent } from "@/lib/format";
-import { billingLines, hasUnbilled, invoiceGroupOf } from "@/lib/invoice-billing";
+import { formatDate, formatDateTime, formatMoney, formatPercent } from "@/lib/format";
+import { invoiceLogLabel, invoiceLogTone } from "@/lib/invoice-log";
+import { billingBalance, invoiceGroupOf } from "@/lib/invoice-billing";
 import { formatLineDiscount, formatQuantity, isBilledInvoiceStatus, isInvoiceOverdue } from "@/lib/invoices";
 import { documentTypeLabel, OPEN_INVOICE_STATUSES, paymentMethodLabel, type Tone } from "@/lib/labels";
 import { displayLineDescription, displayLineNumbers, lineHasAmount, toLineType } from "@/lib/lines";
 import { paymentSummary, sumMoney, toNumber } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 
-import DraftInvoiceActions from "@/components/invoices/DraftInvoiceActions";
+import DeleteInvoiceButton from "@/components/invoices/DeleteInvoiceButton";
+import InvoiceStatusSelect from "@/components/invoices/InvoiceStatusSelect";
 import FormPdfActions from "@/components/invoices/FormPdfActions";
 
 export const instant = false;
@@ -63,6 +65,11 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
           paymentDate: "desc",
         },
       },
+      logs: {
+        orderBy: {
+          createdAt: "desc",
+        },
+      },
     },
   });
 
@@ -77,7 +84,7 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
   // ใบย่อย: ทุกใบของ PO นี้ที่ใช้เลข Invoice เดียวกัน (IV2026/001 ใบย่อยที่ 1, 2, 3 ...)
   // ==========================================
 
-  const [subInvoices, group, poLines] = await Promise.all([
+  const [subInvoices, group, poBalance] = await Promise.all([
     prisma.invoice.findMany({
       where: { purchaseOrderId, invoiceNumber: invoice.invoiceNumber },
       orderBy: { subNumber: "asc" },
@@ -91,14 +98,15 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
       },
     }),
     invoiceGroupOf(prisma, purchaseOrderId),
-    isPoCancelled ? Promise.resolve([]) : billingLines(prisma, purchaseOrderId),
+    isPoCancelled ? Promise.resolve(null) : billingBalance(prisma, purchaseOrderId),
   ]);
 
   const hasSubInvoices = subInvoices.length > 1 || invoice.subNumber > 1;
 
   // ใบย่อยถัดไปจะใช้เลขของกลุ่มล่าสุดของ PO จึงแสดงปุ่มเฉพาะในกลุ่มนั้น
   const canCreateNextSub =
-    !isPoCancelled && group?.invoiceNumber === invoice.invoiceNumber && hasUnbilled(poLines);
+    // ... while some of the PO total is still to bill
+    !isPoCancelled && group?.invoiceNumber === invoice.invoiceNumber && (poBalance?.remaining ?? 0) > 0;
 
   const subInvoicesTotal = sumMoney(
     subInvoices.filter((sub) => sub.status !== "CANCELLED").map((sub) => sub.grandTotal)
@@ -158,6 +166,19 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
 
   const receivePaymentHref = `/payments/new?invoiceId=${invoice.id}`;
 
+  // ==========================================
+  // ประวัติ: invoices created before the history existed get their creation time as the first entry
+  // ==========================================
+
+  const history = [
+    ...invoice.logs,
+    ...(invoice.logs.some((log) => log.action === "CREATED")
+      ? []
+      : [{ id: "created", action: "CREATED", detail: null, userName: null, createdAt: invoice.createdAt }]),
+  ];
+
+  const lastChangedAt = invoice.logs[0]?.createdAt ?? invoice.updatedAt;
+
   return (
     <>
       <PageHeader
@@ -176,6 +197,7 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
             {isInvoiceOverdue(invoice.status, invoice.dueDate) && <Badge tone="danger">เกินกำหนดชำระ</Badge>}
             <Badge tone={isBilled ? "success" : "neutral"}>{isBilled ? "วางบิลแล้ว" : "ยังไม่วางบิล"}</Badge>
             <Badge tone={paymentStateTone}>{paymentStateLabel}</Badge>
+            <span className="text-xs text-slate-500">แก้ไขล่าสุด {formatDateTime(lastChangedAt)}</span>
           </>
         }
         actions={
@@ -190,20 +212,41 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
               </ButtonLink>
             )}
 
-            {invoice.status === "DRAFT" && <DraftInvoiceActions invoiceId={invoice.id} />}
+            {!isCancelled && !isPoCancelled && (
+              <ButtonLink href={`/invoices/${invoice.id}/edit`} variant="outline">
+                <Pencil /> แก้ไข
+              </ButtonLink>
+            )}
 
             {canReceivePayment && (
               <ButtonLink href={receivePaymentHref} variant="success">
                 <Wallet /> รับชำระเงิน
               </ButtonLink>
             )}
+
+            <InvoiceStatusSelect
+              invoiceId={invoice.id}
+              invoiceNumber={invoice.invoiceNumber}
+              status={invoice.status}
+              paid={totalPaid}
+              remaining={remainingAmount}
+              paymentCount={invoice.payments.length}
+            />
+
+            <DeleteInvoiceButton
+              invoiceId={invoice.id}
+              invoiceNumber={invoice.invoiceNumber}
+              paid={totalPaid}
+              paymentCount={invoice.payments.length}
+              redirectTo="/invoices"
+            />
           </>
         }
       />
 
       {isCancelled && (
         <Alert tone="danger" className="mb-6">
-          Invoice นี้ถูกยกเลิกแล้ว ไม่สามารถพิมพ์หรือรับชำระเงินได้
+          Invoice นี้ถูกยกเลิกแล้ว รับชำระเงินไม่ได้ (เปลี่ยนสถานะกลับได้จากช่องสถานะด้านบน)
         </Alert>
       )}
 
@@ -374,7 +417,7 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
                           <Td>{item.unit || "-"}</Td>
 
                           <Td align="right" className="tabular-nums">
-                            {formatMoney(item.unitPrice)}
+                            {toNumber(item.unitPrice) > 0 ? formatMoney(item.unitPrice) : "-"}
                           </Td>
 
                           <Td align="right" className="tabular-nums">
@@ -397,6 +440,40 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
                 <DetailBlock label="หมายเหตุ">{note}</DetailBlock>
               </CardBody>
             )}
+          </Card>
+
+          {/* History */}
+          <Card>
+            <CardHeader title="ประวัติการแก้ไข" description={`${history.length} รายการ · ล่าสุดอยู่บน`} />
+
+            <ol className="divide-y divide-slate-100">
+              {history.map((log) => (
+                <li key={log.id} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1 px-5 py-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge tone={invoiceLogTone(log.action)}>{invoiceLogLabel(log.action)}</Badge>
+                      {log.userName && <span className="text-sm text-slate-700">โดย {log.userName}</span>}
+                    </div>
+                    {log.detail && (
+                      <ul className="mt-1.5 space-y-0.5 text-sm text-slate-600">
+                        {log.detail.split("\n").map((line, index) => (
+                          <li key={index} className="break-words">
+                            {line}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
+                  <time
+                    dateTime={log.createdAt.toISOString()}
+                    className="shrink-0 text-sm tabular-nums text-slate-500"
+                  >
+                    {formatDateTime(log.createdAt)}
+                  </time>
+                </li>
+              ))}
+            </ol>
           </Card>
 
           {/* Purchase Order contact and conditions */}
@@ -509,7 +586,7 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
           </Card>
 
           {/* PDF / print to form */}
-          {!isCancelled && <FormPdfActions invoiceId={invoice.id} />}
+          <FormPdfActions invoiceId={invoice.id} />
 
           {/* Customer */}
           <Card>

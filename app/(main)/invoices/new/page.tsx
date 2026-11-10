@@ -6,8 +6,8 @@ import { Card, CardBody } from "@/components/ui/card";
 import { Alert } from "@/components/ui/feedback";
 import { PageHeader } from "@/components/ui/page-header";
 import { requirePageSession } from "@/lib/auth";
-import { parseDateInput, todayInputValue } from "@/lib/format";
-import { billingLines, hasUnbilled, invoiceGroupOf, suggestInvoiceNumber } from "@/lib/invoice-billing";
+import { formatMoney, parseDateInput, todayInputValue } from "@/lib/format";
+import { billingBalance, billingLines, invoiceGroupOf, suggestInvoiceNumber } from "@/lib/invoice-billing";
 import { toNumber } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 
@@ -108,9 +108,10 @@ export default async function NewInvoicePage({ searchParams }: Props) {
     );
   }
 
-  const [lines, group] = await Promise.all([
+  const [lines, group, balance] = await Promise.all([
     billingLines(prisma, purchaseOrder.id),
     invoiceGroupOf(prisma, purchaseOrder.id),
+    billingBalance(prisma, purchaseOrder.id),
   ]);
 
   if (lines.length === 0) {
@@ -125,12 +126,25 @@ export default async function NewInvoicePage({ searchParams }: Props) {
     );
   }
 
-  if (!hasUnbilled(lines)) {
+  if (balance.total <= 0) {
+    return (
+      <Notice
+        title="Purchase Order นี้ยังไม่มีรายการที่มีราคา"
+        message="เพิ่มรายการที่มี Amount ใน Purchase Order ก่อน จึงจะสร้าง Invoice ได้"
+        href={poHref}
+        linkLabel="กลับ Purchase Order"
+        back={poBack}
+      />
+    );
+  }
+
+  // Every invoice is deducted from the PO total (before VAT): nothing left = nothing more to bill
+  if (balance.remaining <= 0) {
     const latest = purchaseOrder.invoices.findLast((invoice) => invoice.status !== "CANCELLED");
     return (
       <Notice
-        title="ออก Invoice ครบทุกรายการแล้ว"
-        message={`ทุกรายการใน Purchase Order ${purchaseOrder.poNumber} ถูกเรียกเก็บใน Invoice ${group?.invoiceNumber ?? ""} ครบแล้ว`}
+        title="เรียกเก็บครบยอด PO แล้ว"
+        message={`Purchase Order ${purchaseOrder.poNumber} ยอด ${formatMoney(balance.total)} บาท (ก่อน VAT) ถูกเรียกเก็บใน Invoice ${group?.invoiceNumber ?? ""} ครบแล้ว`}
         href={latest ? `/invoices/${latest.id}` : poHref}
         linkLabel={latest ? `ดู Invoice ${latest.invoiceNumber}` : "กลับ Purchase Order"}
         tone="info"
@@ -168,6 +182,7 @@ export default async function NewInvoicePage({ searchParams }: Props) {
     })),
 
     lines,
+    balance,
   };
 
   return (

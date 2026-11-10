@@ -175,11 +175,9 @@ export default function PaymentForm({
 
       toast("บันทึกการรับชำระเงินสำเร็จ");
 
-      // Keep the button disabled (loading stays true) until the invoice page has loaded,
+      // Back to the payment list. Keep the button disabled (loading stays true) until it has loaded,
       // otherwise a second click during navigation would record the payment twice.
-      router.push(
-        `/invoices/${invoice.id}`
-      );
+      router.push("/payments");
 
       router.refresh();
     } catch (error) {

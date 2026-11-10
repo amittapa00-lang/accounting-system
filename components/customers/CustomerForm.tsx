@@ -7,6 +7,7 @@ import { Save, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardFooter, CardHeader } from "@/components/ui/card";
 import { Alert } from "@/components/ui/feedback";
+import { toast } from "@/components/ui/toast";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
 
 /** Values offered for ประเภทสาขา (same list when creating and editing). */
@@ -96,7 +97,6 @@ export default function CustomerForm({ customer }: CustomerFormProps) {
   const [fields, setFields] = useState<Fields>(() => toFields(customer));
 
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
 
   function setField<K extends keyof Fields>(key: K, value: Fields[K]) {
@@ -113,7 +113,6 @@ export default function CustomerForm({ customer }: CustomerFormProps) {
     event.preventDefault();
 
     setError("");
-    setSuccess("");
 
     if (!fields.code.trim()) {
       setError("กรุณากรอกรหัสลูกค้า");
@@ -145,15 +144,14 @@ export default function CustomerForm({ customer }: CustomerFormProps) {
         return;
       }
 
+      toast(isEditMode ? "บันทึกการแก้ไขข้อมูลลูกค้าสำเร็จ" : `บันทึกลูกค้า ${fields.name.trim()} สำเร็จ`);
+
       if (isEditMode) {
-        // Show what was actually saved (the server trims values)
-        if (data.customer) {
-          setFields(toFields(data.customer));
-        }
-        setSuccess("แก้ไขข้อมูลลูกค้าสำเร็จ");
+        // Back to the customer list; refresh so it shows the saved values
+        router.push("/customers");
       } else {
+        // The create form sits on the customer list itself: clear it for the next customer
         setFields(toFields());
-        setSuccess("บันทึกลูกค้าสำเร็จ");
       }
 
       router.refresh();
@@ -317,12 +315,7 @@ export default function CustomerForm({ customer }: CustomerFormProps) {
     </Section>
   );
 
-  const messages = (error || success) && (
-    <div className="space-y-3">
-      {error && <Alert tone="danger">{error}</Alert>}
-      {success && <Alert tone="success">{success}</Alert>}
-    </div>
-  );
+  const messages = error && <Alert tone="danger">{error}</Alert>;
 
   if (!isEditMode) {
     // Create: one compact card that sits next to the customer list

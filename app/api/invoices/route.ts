@@ -3,11 +3,16 @@
  *
  * Body
  *   purchaseOrderId, documentType, invoiceDate, dueDate, paymentTerm, saleName, entryBy, shipToSnapshot
- *   invoiceNumber    first invoice of the PO only; empty = next running number (IV2026/007)
- *   saleOrderNumber  absent = "TC 2026/007-00{sub}"
+ *   invoiceNumber    first invoice of the PO only, must start with IV; empty = next running number (IV2026/007).
+ *                    May be a number another PO uses when the Sale Order No. differs (next sub-number).
+ *   saleOrderNumber  typed by the user; blank = none (duplicates are allowed, except with the same invoice number)
  *   note             หมายเหตุ printed on the form
  *   billDiscount     "10%" | "4800" | "" (bill discount, before VAT)
- *   items            [{ purchaseOrderItemId, quantity }] lines to bill now; absent = everything still unbilled
+ *   billingMode      "PO" (default, เลือกจากรายการ PO) | "CUSTOM" (ทำรายการใหม่)
+ *   items            PO: [{ purchaseOrderItemId, quantity }] lines to bill now; absent = everything still unbilled
+ *   customItems      CUSTOM: [{ lineType, description, quantity, unit, unitPrice, discount, amount }] typed lines, same as PO lines
+ *   vatRate          CUSTOM: VAT % for the typed lines (one rate for the invoice)
+ * Either way the invoice must fit in what is left of the PO total before VAT.
  *
  * See lib/invoice-billing.ts for the numbering and partial-billing rules.
  */
@@ -15,119 +20,30 @@ import { NextResponse } from "next/server";
 
 import { ApiError, handleApiError, optionalText, readJson, requiredText } from "@/lib/api";
 import { requireApiSession } from "@/lib/auth";
-import { parseDateInput, todayInputValue } from "@/lib/format";
 import {
+  billingBalance,
   billingLines,
+  claimInvoiceNumber,
   hasUnbilled,
   invoiceGroupOf,
   lockInvoiceNumbering,
   nextInvoiceNumber,
-  type BillingLine,
 } from "@/lib/invoice-billing";
-import { buildInvoiceLines, defaultSaleOrderNumber } from "@/lib/invoices";
-import { isDocumentType } from "@/lib/labels";
-import { defaultSelectedLines, lineHasAmount } from "@/lib/lines";
-import { parseDiscount, parseNumber, type Numeric } from "@/lib/money";
+import { logInvoice } from "@/lib/invoice-log";
+import { poBalanceError } from "@/lib/invoices";
 import { prisma } from "@/lib/prisma";
 
-const MAX_INVOICE_NUMBER_LENGTH = 40;
-
-/** Text field that falls back to a default only when the client did not send it at all. */
-function textOrDefault(value: unknown, fallback: string | null) {
-  return value === undefined ? fallback : optionalText(value);
-}
-
-function hasAtMost4Decimals(value: number) {
-  const shifted = Number(`${Math.abs(value)}e4`);
-  return Number.isFinite(shifted) && Math.abs(shifted - Math.round(shifted)) < 1e-6;
-}
-
-/** The lines to bill: what the client chose, or everything still unbilled. */
-function selectLines(lines: BillingLine[], rawItems: unknown): { line: BillingLine; quantity: number }[] {
-  const byId = new Map(lines.map((line) => [line.id, line]));
-
-  if (rawItems === undefined) {
-    // Same default as the create form: everything still unbilled, with the text lines of its groups
-    const selected = defaultSelectedLines(lines);
-    return lines.filter((_, index) => selected[index]).map((line) => ({ line, quantity: line.remaining }));
-  }
-
-  if (!Array.isArray(rawItems)) {
-    throw new ApiError(400, "รายการที่เลือกไม่ถูกต้อง");
-  }
-
-  const quantities = new Map<string, number>();
-  for (const raw of rawItems) {
-    const entry = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-    const id = typeof entry.purchaseOrderItemId === "string" ? entry.purchaseOrderItemId : "";
-    const line = byId.get(id);
-    if (!line) throw new ApiError(400, "มีรายการที่ไม่อยู่ใน Purchase Order นี้");
-    if (quantities.has(id)) throw new ApiError(400, "เลือกรายการซ้ำ");
-
-    const label = `รายการ "${line.description}"`;
-
-    // text line (no price): printed only, not billed by quantity
-    if (!lineHasAmount(line)) {
-      quantities.set(id, 0);
-      continue;
-    }
-
-    const quantity = parseNumber(entry.quantity as Numeric);
-    if (quantity === null || quantity <= 0) throw new ApiError(400, `${label}: จำนวนที่เรียกเก็บต้องมากกว่า 0`);
-    if (!hasAtMost4Decimals(quantity)) throw new ApiError(400, `${label}: จำนวนมีทศนิยมได้ไม่เกิน 4 ตำแหน่ง`);
-    if (quantity > line.remaining + 1e-9) {
-      throw new ApiError(
-        400,
-        `${label}: เรียกเก็บได้อีกไม่เกิน ${line.remaining} (PO ${line.quantity}, เรียกเก็บแล้ว ${line.billed})`
-      );
-    }
-    quantities.set(id, quantity);
-  }
-
-  const selected = lines.filter((line) => quantities.has(line.id));
-  if (!selected.some((line) => lineHasAmount(line))) {
-    throw new ApiError(400, "กรุณาเลือกรายการที่จะเรียกเก็บอย่างน้อย 1 รายการ");
-  }
-
-  return selected.map((line) => ({ line, quantity: quantities.get(line.id) ?? 0 }));
-}
+import { parseBillingMode, parseInvoiceDates, parseRequestedNumber, priceInvoice, textOrDefault } from "./input";
 
 export async function POST(request: Request) {
   try {
-    await requireApiSession();
+    const session = await requireApiSession();
 
     const body = await readJson(request);
 
     const purchaseOrderId = requiredText(body.purchaseOrderId, "ไม่พบ Purchase Order");
-
-    const documentType = body.documentType;
-    if (!isDocumentType(documentType)) {
-      throw new ApiError(400, "กรุณาเลือกประเภทเอกสารให้ถูกต้อง");
-    }
-
-    const invoiceDate =
-      body.invoiceDate === undefined || body.invoiceDate === null || body.invoiceDate === ""
-        ? parseDateInput(todayInputValue())
-        : parseDateInput(body.invoiceDate);
-    if (!invoiceDate) {
-      throw new ApiError(400, "วันที่ Invoice ไม่ถูกต้อง");
-    }
-
-    let dueDate: Date | null = null;
-    if (body.dueDate !== undefined && body.dueDate !== null && body.dueDate !== "") {
-      dueDate = parseDateInput(body.dueDate);
-      if (!dueDate) {
-        throw new ApiError(400, "วันครบกำหนดชำระไม่ถูกต้อง");
-      }
-      if (dueDate < invoiceDate) {
-        throw new ApiError(400, "วันครบกำหนดชำระต้องไม่ก่อนวันที่ Invoice");
-      }
-    }
-
-    const requestedNumber = optionalText(body.invoiceNumber);
-    if (requestedNumber && requestedNumber.length > MAX_INVOICE_NUMBER_LENGTH) {
-      throw new ApiError(400, "เลข Invoice ยาวเกินไป");
-    }
+    const { documentType, invoiceDate, dueDate } = parseInvoiceDates(body);
+    const requestedNumber = parseRequestedNumber(body.invoiceNumber);
 
     const invoice = await prisma.$transaction(
       async (tx) => {
@@ -153,19 +69,17 @@ export async function POST(request: Request) {
         if (lines.length === 0) {
           throw new ApiError(400, "Purchase Order นี้ยังไม่มีรายการสินค้า");
         }
-        if (!hasUnbilled(lines)) {
-          throw new ApiError(409, "Purchase Order นี้ออก Invoice ครบทุกรายการแล้ว");
+        if (parseBillingMode(body.billingMode) === "PO" && !hasUnbilled(lines)) {
+          throw new ApiError(409, "รายการใน Purchase Order นี้ออก Invoice ครบแล้ว (ใช้ \"ทำรายการใหม่\" เพื่อเรียกเก็บยอดที่เหลือ)");
         }
 
-        const selection = selectLines(lines, body.items);
+        const { totals, items } = priceInvoice(body, lines);
 
-        // Bill discount is validated against this invoice's line total
-        const preview = buildInvoiceLines(selection);
-        const discount = parseDiscount(body.billDiscount as Numeric, preview.totals.itemsTotal);
-        const { lines: invoiceLines, totals } = buildInvoiceLines(
-          selection.map(({ line, quantity }) => ({ line, quantity, billedBefore: line.billed })),
-          { value: discount.value, type: discount.type }
-        );
+        // Every invoice is deducted from the PO: together they bill at most the PO total before VAT
+        const balanceError = poBalanceError(totals.subtotal, await billingBalance(tx, purchaseOrderId));
+        if (balanceError) {
+          throw new ApiError(400, balanceError);
+        }
 
         // Numbering: one invoice number per PO, sub-numbers for each billing
         await lockInvoiceNumbering(tx);
@@ -177,15 +91,16 @@ export async function POST(request: Request) {
           invoiceNumber = group.invoiceNumber;
           subNumber = group.nextSubNumber;
         } else {
+          // A typed number may be one another PO uses, with a different Sale Order No.
           invoiceNumber = requestedNumber ?? (await nextInvoiceNumber(tx, invoiceDate));
-          subNumber = 1;
-          const taken = await tx.invoice.findFirst({ where: { invoiceNumber }, select: { id: true } });
-          if (taken) {
-            throw new ApiError(409, `เลข Invoice ${invoiceNumber} ถูกใช้แล้ว กรุณาใช้เลขอื่น`);
-          }
+          subNumber = await claimInvoiceNumber(tx, {
+            invoiceNumber,
+            saleOrderNumber: optionalText(body.saleOrderNumber),
+            purchaseOrderId,
+          });
         }
 
-        return tx.invoice.create({
+        const created = await tx.invoice.create({
           data: {
             invoiceNumber,
             subNumber,
@@ -200,39 +115,25 @@ export async function POST(request: Request) {
             shipToSnapshot: textOrDefault(body.shipToSnapshot, purchaseOrder.deliveryPlace),
             dueDate,
             paymentTerm: textOrDefault(body.paymentTerm, purchaseOrder.paymentTerm),
-            saleOrderNumber: textOrDefault(body.saleOrderNumber, defaultSaleOrderNumber(invoiceNumber, subNumber)),
+            saleOrderNumber: optionalText(body.saleOrderNumber),
             saleName: optionalText(body.saleName),
             entryBy: optionalText(body.entryBy),
             note: textOrDefault(body.note, purchaseOrder.note),
 
             purchaseOrderId: purchaseOrder.id,
 
-            billDiscount: discount.value,
-            billDiscountType: discount.type,
-            billDiscountAmount: totals.discountAmount,
-            subtotal: totals.subtotal,
-            vat: totals.vat,
-            grandTotal: totals.grandTotal,
+            ...totals,
 
             status: "DRAFT",
 
-            items: {
-              create: invoiceLines.map(({ line, quantity, amount, discount: lineDiscount, discountType }, index) => ({
-                itemNo: index + 1,
-                lineType: line.lineType,
-                description: line.description,
-                quantity,
-                unit: line.unit,
-                unitPrice: line.unitPrice,
-                discount: lineDiscount,
-                discountType,
-                amount,
-                purchaseOrderItemId: line.id,
-              })),
-            },
+            items: { create: items },
           },
           include: { items: true },
         });
+
+        await logInvoice(tx, created.id, "CREATED", session, subNumber > 1 ? `ใบย่อยที่ ${subNumber}` : null);
+
+        return created;
       },
       // Waiting for the PO / numbering locks counts against the timeout
       { timeout: 15_000 }
